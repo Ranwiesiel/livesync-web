@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react'
+import { Loader2, Upload } from 'lucide-react'
 
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import {
   requestPresignedUpload,
   uploadToR2,
   type PresignedUpload,
-} from '../services/upload'
-import './FileUploadButton.css'
+} from '@/services/upload'
 
 type Status = 'idle' | 'uploading' | 'success' | 'error'
 
@@ -88,63 +90,81 @@ function FileUploadButton() {
   const sedangUpload = status === 'uploading'
 
   return (
-    <div className="upload">
-      <input
+    <div className="flex flex-col items-center gap-4 rounded-lg border border-dashed bg-muted/30 p-6">
+      <Input
         ref={inputRef}
         type="file"
         accept={ACCEPT}
-        className="upload__input"
+        className="sr-only"
         onChange={pilihFile}
       />
 
       {preview && (
-        <img className="upload__preview" src={preview} alt="Pratinjau file" />
+        <img
+          className="max-h-56 w-full max-w-sm rounded-md border bg-background object-contain"
+          src={preview}
+          alt="Pratinjau file"
+        />
       )}
 
       {file && (
-        <p className="upload__file" title={file.name}>
+        <p
+          className="max-w-full truncate text-sm text-muted-foreground"
+          title={file.name}
+        >
           {file.name}
         </p>
       )}
 
-      <button
+      <Button
         type="button"
-        className="upload__button"
         disabled={sedangUpload}
         onClick={() => inputRef.current?.click()}
       >
+        {sedangUpload ? (
+          <Loader2 className="animate-spin" />
+        ) : (
+          <Upload />
+        )}
         {sedangUpload
           ? 'Mengunggah…'
           : status === 'idle'
             ? 'Pilih foto'
             : 'Pilih foto lain'}
-      </button>
+      </Button>
 
       {sedangUpload && (
-        <div className="upload__progress-wrap">
+        <div className="w-full max-w-sm space-y-1.5">
           <div
-            className="upload__progress"
+            className="h-2.5 w-full overflow-hidden rounded-full bg-secondary"
             role="progressbar"
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={persen}
             aria-label="Progress upload"
           >
-            <div className="upload__bar" style={{ width: `${persen}%` }} />
+            <div
+              className="h-full bg-primary transition-[width] duration-150"
+              style={{ width: `${persen}%` }}
+            />
           </div>
-          <span className="upload__persen">{persen}%</span>
+          <span className="block text-center text-xs text-muted-foreground">
+            {persen}%
+          </span>
         </div>
       )}
 
       {status === 'success' && (
-        <div className="upload__status upload__status--ok">
+        <div className="flex flex-col items-center gap-1 text-sm text-emerald-600">
           <strong>Upload berhasil.</strong>
-          <code>{uploadedKey}</code>
+          <code className="max-w-full break-all rounded bg-muted px-2 py-1 font-mono text-xs text-foreground">
+            {uploadedKey}
+          </code>
         </div>
       )}
 
       {status === 'error' && error && (
-        <div className="upload__status upload__status--error" role="alert">
+        <div role="alert" className="text-center text-sm text-destructive">
           {error}
         </div>
       )}
