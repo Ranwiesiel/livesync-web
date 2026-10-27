@@ -1,6 +1,7 @@
 import axios from 'axios'
 
 import { api } from './api'
+import type { Photo } from '@/types/photo'
 
 export interface PresignedUpload {
   upload_url: string
@@ -117,4 +118,75 @@ export async function uploadToR2(
     }
     throw new UploadError('Upload ke R2 gagal.')
   }
+}
+
+export interface ConfirmPhotoInput {
+  eventId: string
+  storageKey: string
+  uploader?: string
+  blurHash?: string
+}
+
+/**
+ * Menyimpan metadata foto ke MongoDB lewat API setelah object berhasil
+ * di-upload ke R2. Server yang membangun URL publik dari storage_key.
+ */
+export async function confirmPhotoUpload({
+  eventId,
+  storageKey,
+  uploader,
+  blurHash,
+}: ConfirmPhotoInput): Promise<Photo> {
+  try {
+    const response = await api.post<APIEnvelope<Photo>>('/api/media/confirm', {
+      event_id: eventId,
+      storage_key: storageKey,
+      ...(uploader ? { uploader } : {}),
+      ...(blurHash ? { blur_hash: blurHash } : {}),
+    })
+
+    const body = response.data
+
+    if (!body.success || !body.data) {
+      throw new UploadError(
+        body.error?.message ?? 'Gagal menyimpan foto ke event.',
+      )
+    }
+
+    return body.data
+  } catch (error) {
+    if (error instanceof UploadError) throw error
+
+    if (axios.isAxiosError(error)) {
+      const message = (
+        error.response?.data as APIEnvelope<never> | undefined
+      )?.error?.message
+
+      throw new UploadError(message ?? 'Gagal menyimpan foto ke event.')
+    }
+
+    throw new UploadError('Gagal menyimpan foto ke event.')
+  }
+}
+
+export interface UploadPhotoOptions {
+  eventId: string
+  uploader?: string
+  onProgress?: (fraction: number) => void
+}
+
+/** Alur lengkap satu foto: presign → PUT langsung ke R2 → simpan ke Mongo. */
+export async function uploadPhoto(
+  file: File,
+  { eventId, uploader, onProgress }: UploadPhotoOptions,
+): Promise<Photo> {
+  const presign = await requestPresignedUpload(file)
+
+  await uploadToR2(file, presign, onProgress)
+
+  return confirmPhotoUpload({
+    eventId,
+    storageKey: presign.key,
+    uploader,
+  })
 }

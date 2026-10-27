@@ -1,6 +1,6 @@
 
 import { useState, type FormEvent } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
 
 import { api } from "@/services/api";
@@ -11,6 +11,7 @@ import EventFormLayout from "@/components/event/EventFormLayout";
 import EventFormField from "@/components/event/EventFormField";
 import EventFeedback from "@/components/event/EventFeedback";
 import EventResultCard from "@/components/event/EventResultCard";
+import FileUploadButton from "@/components/FileUploadButton";
 import PhotoGallery from "@/components/photos/PhotoGallery";
 
 function getErrorMessage(error: unknown): string {
@@ -33,6 +34,7 @@ function getErrorMessage(error: unknown): string {
 export default function JoinEventPage() {
   const [code, setCode] = useState("");
   const [submittedCode, setSubmittedCode] = useState("");
+  const queryClient = useQueryClient();
 
   const eventQuery = useQuery({
     queryKey: ["event", submittedCode],
@@ -84,6 +86,14 @@ export default function JoinEventPage() {
     eventQuery.data && submittedCode === code
       ? eventQuery.data
       : null;
+
+  function handlePhotoUploaded() {
+    if (!foundEvent) return;
+
+    void queryClient.invalidateQueries({
+      queryKey: ["event-photos", foundEvent.id],
+    });
+  }
 
   return (
     <EventFormLayout
@@ -153,6 +163,19 @@ export default function JoinEventPage() {
               </EventFeedback>
             )}
           </EventResultCard>
+
+          {foundEvent.is_active && (
+            <section className="space-y-4">
+              <h2 className="text-xl font-semibold">Unggah foto</h2>
+
+              <FileUploadButton
+                key={foundEvent.id}
+                eventId={foundEvent.id}
+                uploader="Peserta"
+                onUploaded={handlePhotoUploaded}
+              />
+            </section>
+          )}
 
           {foundEvent.is_active && (
             <PhotoGallery

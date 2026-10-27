@@ -6,7 +6,9 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  // Folder "@" adalah salinan shadcn/ui yang tidak dipakai aplikasi
+  // (alias "@" mengarah ke ./src).
+  globalIgnores(['dist', '@']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [

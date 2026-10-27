@@ -3,11 +3,8 @@ import { Loader2, Upload } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import {
-  requestPresignedUpload,
-  uploadToR2,
-  type PresignedUpload,
-} from '@/services/upload'
+import { uploadPhoto } from '@/services/upload'
+import type { Photo } from '@/types/photo'
 
 type Status = 'idle' | 'uploading' | 'success' | 'error'
 
@@ -20,7 +17,18 @@ const ACCEPT = [
   'image/heif',
 ].join(',')
 
-function FileUploadButton() {
+interface FileUploadButtonProps {
+  /** Event yang akan menerima foto. Upload tanpa event tidak bisa disimpan. */
+  eventId: string
+  uploader?: string
+  onUploaded?: (photo: Photo) => void
+}
+
+function FileUploadButton({
+  eventId,
+  uploader,
+  onUploaded,
+}: FileUploadButtonProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const uploadRef = useRef(0)
   const previewRef = useRef<string | null>(null)
@@ -29,7 +37,7 @@ function FileUploadButton() {
   const [preview, setPreview] = useState<string | null>(null)
   const [status, setStatus] = useState<Status>('idle')
   const [progress, setProgress] = useState(0)
-  const [uploadedKey, setUploadedKey] = useState<string | null>(null)
+  const [uploadedPhoto, setUploadedPhoto] = useState<Photo | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -49,21 +57,24 @@ function FileUploadButton() {
 
     setStatus('uploading')
     setProgress(0)
-    setUploadedKey(null)
+    setUploadedPhoto(null)
     setError(null)
 
     try {
-      const presign: PresignedUpload = await requestPresignedUpload(target)
-
-      await uploadToR2(target, presign, (fraction) => {
-        if (uploadRef.current === id) setProgress(fraction)
+      const saved = await uploadPhoto(target, {
+        eventId,
+        uploader,
+        onProgress: (fraction) => {
+          if (uploadRef.current === id) setProgress(fraction)
+        },
       })
 
       if (uploadRef.current !== id) return
 
       setProgress(1)
-      setUploadedKey(presign.key)
+      setUploadedPhoto(saved)
       setStatus('success')
+      onUploaded?.(saved)
     } catch (cause) {
       if (uploadRef.current !== id) return
 
@@ -154,11 +165,11 @@ function FileUploadButton() {
         </div>
       )}
 
-      {status === 'success' && (
+      {status === 'success' && uploadedPhoto && (
         <div className="flex flex-col items-center gap-1 text-sm text-emerald-600">
           <strong>Upload berhasil.</strong>
           <code className="max-w-full break-all rounded bg-muted px-2 py-1 font-mono text-xs text-foreground">
-            {uploadedKey}
+            {uploadedPhoto.storage_key}
           </code>
         </div>
       )}

@@ -1,7 +1,7 @@
 
 import { BrowserRouter, Routes, Route, Link } from 'react-router-dom'
 
-import FileUploadButton from '@/components/FileUploadButton'
+import { Button } from '@/components/ui/button'
 import {
   Card,
   CardContent,
@@ -23,16 +23,23 @@ function HomePage() {
             LiveSync Gallery
           </p>
           <CardTitle className="text-2xl">
-            Upload foto ke galeri
+            Bagikan foto ke event
           </CardTitle>
           <CardDescription>
-            File dikirim langsung ke Cloudflare R2 lewat presigned URL.
-            Server hanya menandatangani URL, isi file tidak melewati API.
+            Buat event baru atau gabung dengan PIN enam digit, lalu unggah
+            foto langsung ke Cloudflare R2. Foto yang tersimpan akan muncul
+            di galeri event.
           </CardDescription>
         </CardHeader>
 
-        <CardContent>
-          <FileUploadButton />
+        <CardContent className="flex flex-col gap-3 sm:flex-row">
+          <Button asChild className="flex-1">
+            <Link to="/events/create">Buat event</Link>
+          </Button>
+
+          <Button asChild variant="outline" className="flex-1">
+            <Link to="/events/join">Gabung event</Link>
+          </Button>
         </CardContent>
 
         <CardFooter className="justify-center border-t pt-6 text-xs text-muted-foreground">

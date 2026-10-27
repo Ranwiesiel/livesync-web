@@ -15,11 +15,14 @@ vi.mock('./api', () => ({
 
 import { api } from './api'
 import {
+  confirmPhotoUpload,
   requestPresignedUpload,
+  uploadPhoto,
   uploadToR2,
   UploadError,
   type PresignedUpload,
 } from './upload'
+import type { Photo } from '@/types/photo'
 
 const presign: PresignedUpload = {
   upload_url: 'https://r2.example.com/livesync-dev/uploads/a.png?X-Amz-Signature=abc',
@@ -127,6 +130,119 @@ describe('uploadToR2', () => {
 
     await expect(uploadToR2(file, presign)).rejects.toThrow(
       'R2 menolak upload (403). Content-Type harus sama persis dengan yang di-presign.',
+    )
+  })
+})
+
+const photo: Photo = {
+  id: '66f1c0ffee00000000000001',
+  event_id: '66f1c0ffee00000000000002',
+  storage_key: presign.key,
+  url: 'https://cdn.example.com/uploads/a.png',
+  blur_hash: '',
+  uploader: 'Peserta',
+  created_at: '2026-10-22T10:00:00Z',
+}
+
+function mockPostSequence(...payloads: unknown[]) {
+  const post = vi.mocked(api.post)
+
+  payloads.forEach((payload) => {
+    post.mockResolvedValueOnce({
+      data: payload,
+    } as unknown as Awaited<ReturnType<typeof api.post>>)
+  })
+}
+
+describe('confirmPhotoUpload', () => {
+  beforeEach(() => {
+    vi.mocked(api.post).mockReset()
+  })
+
+  it('mengirim event_id dan storage_key lalu mengembalikan foto tersimpan', async () => {
+    mockPost({ success: true, data: photo, error: null })
+
+    const result = await confirmPhotoUpload({
+      eventId: photo.event_id,
+      storageKey: photo.storage_key,
+      uploader: 'Peserta',
+    })
+
+    expect(result).toEqual(photo)
+    expect(api.post).toHaveBeenCalledWith('/api/media/confirm', {
+      event_id: photo.event_id,
+      storage_key: photo.storage_key,
+      uploader: 'Peserta',
+    })
+  })
+
+  it('melempar pesan dari backend saat konfirmasi gagal', async () => {
+    mockPost({
+      success: false,
+      data: null,
+      error: { message: 'Event tidak ditemukan' },
+    })
+
+    await expect(
+      confirmPhotoUpload({
+        eventId: photo.event_id,
+        storageKey: photo.storage_key,
+      }),
+    ).rejects.toThrow('Event tidak ditemukan')
+  })
+})
+
+describe('uploadPhoto', () => {
+  beforeEach(() => {
+    vi.mocked(api.post).mockReset()
+    vi.mocked(axios.put).mockReset()
+  })
+
+  it('menjalankan presign, PUT ke R2, lalu konfirmasi ke Mongo', async () => {
+    mockPostSequence(
+      { success: true, data: presign, error: null },
+      { success: true, data: photo, error: null },
+    )
+    vi.mocked(axios.put).mockResolvedValue({ status: 200 })
+
+    const file = new File(['x'], 'foto.png', { type: 'image/png' })
+    const result = await uploadPhoto(file, { eventId: photo.event_id })
+
+    expect(axios.put).toHaveBeenCalledWith(
+      presign.upload_url,
+      file,
+      expect.objectContaining({
+        headers: { 'Content-Type': presign.content_type },
+      }),
+    )
+    expect(api.post).toHaveBeenNthCalledWith(
+      1,
+      '/api/media/presign-upload',
+      { filename: 'foto.png', content_type: 'image/png' },
+    )
+    expect(api.post).toHaveBeenNthCalledWith(2, '/api/media/confirm', {
+      event_id: photo.event_id,
+      storage_key: presign.key,
+    })
+    expect(result).toEqual(photo)
+  })
+
+  it('tidak mengonfirmasi ke Mongo saat upload R2 gagal', async () => {
+    mockPostSequence({ success: true, data: presign, error: null })
+    vi.mocked(axios.put).mockRejectedValue({
+      isAxiosError: true,
+      response: { status: 403 },
+    })
+
+    const file = new File(['x'], 'foto.png', { type: 'image/png' })
+
+    await expect(
+      uploadPhoto(file, { eventId: photo.event_id }),
+    ).rejects.toBeInstanceOf(UploadError)
+    expect(api.post).toHaveBeenCalledTimes(1)
+    expect(api.post).not.toHaveBeenCalledWith(
+      '/api/media/confirm',
+      expect.anything(),
     )
   })
 })
