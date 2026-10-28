@@ -13,6 +13,7 @@ import {
 
 import CreateEventPage from '@/pages/event/CreateEventPage'
 import JoinEventPage from '@/pages/event/JoinEventPage'
+import EventDetailPage from '@/pages/event/EventDetailPage'
 
 function HomePage() {
   return (
@@ -63,6 +64,7 @@ function App() {
         <Route path="/" element={<HomePage />} />
         <Route path="/events/create" element={<CreateEventPage />} />
         <Route path="/events/join" element={<JoinEventPage />} />
+        <Route path="/events/detail/:code" element={<EventDetailPage />} />
       </Routes>
     </BrowserRouter>
   )

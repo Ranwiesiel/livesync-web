@@ -1,6 +1,7 @@
 
 import { useEventPhotos } from "@/hooks/use-event-photos";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 
 interface PhotoGalleryProps {
   eventId: string;
@@ -23,12 +24,17 @@ export default function PhotoGallery({
   columns = 4,
 }: PhotoGalleryProps) {
   const {
-    data: photos = [],
+    data,
     isPending,
     isError,
     refetch,
     isFetching,
-  } = useEventPhotos(eventId);
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useEventPhotos({ eventId });
+
+  const photos = data?.pages.flatMap((page) => page.items) ?? [];
 
   return (
     <section className="space-y-4">
@@ -49,14 +55,14 @@ export default function PhotoGallery({
             Gagal memuat foto. Periksa koneksi dan coba kembali.
           </p>
 
-          <button
+          <Button
             type="button"
-            onClick={() => refetch()}
+            onClick={() => void refetch()}
             disabled={isFetching}
-            className="rounded-md border px-4 py-2 text-sm font-medium transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+            variant="outline"
           >
             {isFetching ? "Memuat..." : "Coba lagi"}
-          </button>
+          </Button>
         </div>
       ) : photos.length === 0 ? (
         <div className="rounded-xl border border-dashed p-8 text-center">
@@ -65,21 +71,35 @@ export default function PhotoGallery({
           </p>
         </div>
       ) : (
-        <div className={`grid ${columnClasses[columns]} gap-3`}>
-          {photos.map((photo) => (
-            <Card
-              key={photo.id}
-              className="overflow-hidden p-0"
-            >
-              <img
-                src={photo.url}
-                alt={`Foto event ${title}`}
-                loading="lazy"
-                className="aspect-square w-full object-cover transition-transform duration-200 hover:scale-105"
-              />
-            </Card>
-          ))}
-        </div>
+        <>
+          <div className={`grid ${columnClasses[columns]} gap-3`}>
+            {photos.map((photo) => (
+              <Card key={photo.id} className="overflow-hidden p-0">
+                <img
+                  src={photo.thumbnail_url || photo.url}
+                  alt={`Foto event ${title}`}
+                  loading="lazy"
+                  className="aspect-square w-full object-cover transition-transform duration-200 hover:scale-105"
+                />
+              </Card>
+            ))}
+          </div>
+
+          {hasNextPage && (
+            <div className="flex justify-center">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void fetchNextPage()}
+                disabled={isFetchingNextPage}
+              >
+                {isFetchingNextPage
+                  ? "Memuat foto..."
+                  : "Muat lebih banyak"}
+              </Button>
+            </div>
+          )}
+        </>
       )}
     </section>
   );

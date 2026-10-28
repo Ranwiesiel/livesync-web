@@ -4,7 +4,10 @@ export interface Photo {
   event_id: string;
   storage_key: string;
   url: string;
-  blur_hash: string;
+  thumbnail_url?: string;
+  width?: number;
+  height?: number;
+  blur_hash?: string;
   uploader: string;
   created_at: string;
 }
@@ -15,4 +18,10 @@ export interface ApiResponse<T> {
   error: {
     message: string;
   } | null;
+}
+
+export interface PaginatedPhotos {
+  items: Photo[];
+  next_cursor: string;
+  has_more: boolean;
 }

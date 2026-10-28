@@ -1,6 +1,7 @@
 
-import { useState, type FormEvent } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState, type FormEvent } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
 
 import { api } from "@/services/api";
@@ -10,9 +11,6 @@ import { Button } from "@/components/ui/button";
 import EventFormLayout from "@/components/event/EventFormLayout";
 import EventFormField from "@/components/event/EventFormField";
 import EventFeedback from "@/components/event/EventFeedback";
-import EventResultCard from "@/components/event/EventResultCard";
-import FileUploadButton from "@/components/FileUploadButton";
-import PhotoGallery from "@/components/photos/PhotoGallery";
 
 function getErrorMessage(error: unknown): string {
   if (axios.isAxiosError<ApiResponse<never>>(error)) {
@@ -34,7 +32,7 @@ function getErrorMessage(error: unknown): string {
 export default function JoinEventPage() {
   const [code, setCode] = useState("");
   const [submittedCode, setSubmittedCode] = useState("");
-  const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   const eventQuery = useQuery({
     queryKey: ["event", submittedCode],
@@ -54,6 +52,19 @@ export default function JoinEventPage() {
     enabled: /^\d{6}$/.test(submittedCode),
     retry: false,
   });
+
+  const foundEvent =
+    eventQuery.data && submittedCode === code
+      ? eventQuery.data
+      : null;
+
+  useEffect(() => {
+    if (foundEvent?.is_active) {
+      navigate(`/events/detail/${encodeURIComponent(foundEvent.code)}`, {
+        replace: true,
+      });
+    }
+  }, [foundEvent, navigate]);
 
   function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -80,19 +91,6 @@ export default function JoinEventPage() {
     if (normalizedCode !== submittedCode) {
       setSubmittedCode("");
     }
-  }
-
-  const foundEvent =
-    eventQuery.data && submittedCode === code
-      ? eventQuery.data
-      : null;
-
-  function handlePhotoUploaded() {
-    if (!foundEvent) return;
-
-    void queryClient.invalidateQueries({
-      queryKey: ["event-photos", foundEvent.id],
-    });
   }
 
   return (
@@ -126,68 +124,20 @@ export default function JoinEventPage() {
           </EventFeedback>
         )}
 
+        {foundEvent && !foundEvent.is_active && (
+          <EventFeedback type="info">
+            Event ini sedang tidak aktif dan belum dapat diikuti.
+          </EventFeedback>
+        )}
+
         <Button
           type="submit"
           className="w-full"
           disabled={code.length !== 6 || eventQuery.isFetching}
         >
-          {eventQuery.isFetching ? "Mencari event..." : "Cari event"}
+          {eventQuery.isFetching ? "Mencari event..." : "Gabung event"}
         </Button>
       </form>
-
-      
-      {foundEvent && (
-        <div className="space-y-6">
-          <EventResultCard
-            title="Event ditemukan"
-            description="Informasi event berdasarkan PIN yang kamu masukkan."
-          >
-            <p className="event-result__event-name">
-              {foundEvent.title}
-            </p>
-
-            <div className="room-code">
-              <span className="room-code__label">KODE ROOM</span>
-              <strong className="room-code__value">
-                {foundEvent.code}
-              </strong>
-            </div>
-
-            {foundEvent.is_active ? (
-              <EventFeedback type="success">
-                Event aktif dan tersedia.
-              </EventFeedback>
-            ) : (
-              <EventFeedback type="info">
-                Event ini sedang tidak aktif.
-              </EventFeedback>
-            )}
-          </EventResultCard>
-
-          {foundEvent.is_active && (
-            <section className="space-y-4">
-              <h2 className="text-xl font-semibold">Unggah foto</h2>
-
-              <FileUploadButton
-                key={foundEvent.id}
-                eventId={foundEvent.id}
-                uploader="Peserta"
-                onUploaded={handlePhotoUploaded}
-              />
-            </section>
-          )}
-
-          {foundEvent.is_active && (
-            <PhotoGallery
-              eventId={foundEvent.id}
-              title="Foto Event"
-              emptyMessage="Belum ada foto yang diunggah ke event ini."
-              columns={3}
-            />
-          )}
-        </div>
-      )}
-
     </EventFormLayout>
   );
 }
