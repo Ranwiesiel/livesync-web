@@ -16,6 +16,7 @@ vi.mock('./api', () => ({
 import { api } from './api'
 import {
   confirmPhotoUpload,
+  confirmPhotosBatch,
   requestPresignedUpload,
   uploadPhoto,
   uploadToR2,
@@ -187,6 +188,62 @@ describe('confirmPhotoUpload', () => {
       confirmPhotoUpload({
         eventId: photo.event_id,
         storageKey: photo.storage_key,
+      }),
+    ).rejects.toThrow('Event tidak ditemukan')
+  })
+})
+
+describe('confirmPhotosBatch', () => {
+  beforeEach(() => {
+    vi.mocked(api.post).mockReset()
+  })
+
+  it('mengirim semua foto dalam satu request dan mengembalikan items + failed', async () => {
+    mockPost({
+      success: true,
+      data: {
+        items: [photo],
+        failed: [
+          { storage_key: 'uploads/rusak.png', message: 'storage key tidak valid' },
+        ],
+      },
+      error: null,
+    })
+
+    const result = await confirmPhotosBatch({
+      eventId: photo.event_id,
+      uploader: 'Peserta',
+      photos: [
+        { storage_key: photo.storage_key },
+        { storage_key: 'uploads/rusak.png', blur_hash: 'LKO2' },
+      ],
+    })
+
+    expect(api.post).toHaveBeenCalledWith('/api/media/confirm-batch', {
+      event_id: photo.event_id,
+      uploader: 'Peserta',
+      photos: [
+        { storage_key: photo.storage_key },
+        { storage_key: 'uploads/rusak.png', blur_hash: 'LKO2' },
+      ],
+    })
+    expect(result.items).toEqual([photo])
+    expect(result.failed).toEqual([
+      { storage_key: 'uploads/rusak.png', message: 'storage key tidak valid' },
+    ])
+  })
+
+  it('melempar pesan backend saat batch ditolak seluruhnya', async () => {
+    mockPost({
+      success: false,
+      data: null,
+      error: { message: 'Event tidak ditemukan' },
+    })
+
+    await expect(
+      confirmPhotosBatch({
+        eventId: photo.event_id,
+        photos: [{ storage_key: photo.storage_key }],
       }),
     ).rejects.toThrow('Event tidak ditemukan')
   })

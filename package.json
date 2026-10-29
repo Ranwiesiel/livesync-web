@@ -26,6 +26,7 @@
     "postcss": "^8.5.31",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
+    "react-dropzone": "^20.1.4",
     "react-router-dom": "^7.18.4",
     "shadcn": "^4.22.1",
     "tailwind-merge": "^3.7.0",

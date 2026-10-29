@@ -25,3 +25,18 @@ export interface PaginatedPhotos {
   next_cursor: string;
   has_more: boolean;
 }
+
+export interface BatchPhotoInput {
+  storage_key: string;
+  blur_hash?: string;
+}
+
+export interface BatchPhotoFailure {
+  storage_key: string;
+  message: string;
+}
+
+export interface BatchConfirmResult {
+  items: Photo[];
+  failed: BatchPhotoFailure[];
+}

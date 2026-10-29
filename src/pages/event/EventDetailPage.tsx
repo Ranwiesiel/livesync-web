@@ -1,4 +1,5 @@
 
+import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import axios from "axios";
@@ -9,12 +10,13 @@ import type { ApiResponse, Event } from "@/types/event";
 import { Button } from "@/components/ui/button";
 import EventFeedback from "@/components/event/EventFeedback";
 import EventResultCard from "@/components/event/EventResultCard";
-import FileUploadButton from "@/components/FileUploadButton";
+import DropzoneModal from "@/components/photos/DropzoneModal";
 import PhotoGallery from "@/components/photos/PhotoGallery";
 
 export default function EventDetailPage() {
   const { code = "" } = useParams<{ code: string }>();
   const queryClient = useQueryClient();
+  const [uploadOpen, setUploadOpen] = useState(false);
 
   const eventQuery = useQuery({
     queryKey: ["event", code],
@@ -132,18 +134,25 @@ export default function EventDetailPage() {
 
       {event.is_active && (
         <section className="space-y-4">
-          <div>
-            <h2 className="text-xl font-semibold">Unggah foto</h2>
-            <p className="text-sm text-muted-foreground">
-              Bagikan foto ke galeri event ini.
-            </p>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-semibold">Unggah foto</h2>
+              <p className="text-sm text-muted-foreground">
+                Bagikan banyak foto sekaligus ke galeri event ini.
+              </p>
+            </div>
+
+            <Button type="button" onClick={() => setUploadOpen(true)}>
+              Tambah foto
+            </Button>
           </div>
 
-          <FileUploadButton
-            key={event.id}
+          <DropzoneModal
+            open={uploadOpen}
+            onOpenChange={setUploadOpen}
             eventId={event.id}
             uploader="Peserta"
-            onUploaded={handlePhotoUploaded}
+            onCompleted={handlePhotoUploaded}
           />
         </section>
       )}

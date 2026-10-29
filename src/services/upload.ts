@@ -1,7 +1,11 @@
 import axios from 'axios'
 
 import { api } from './api'
-import type { Photo } from '@/types/photo'
+import type {
+  BatchConfirmResult,
+  BatchPhotoInput,
+  Photo,
+} from '@/types/photo'
 
 export interface PresignedUpload {
   upload_url: string
@@ -128,22 +132,15 @@ export interface ConfirmPhotoInput {
 }
 
 /**
- * Menyimpan metadata foto ke MongoDB lewat API setelah object berhasil
- * di-upload ke R2. Server yang membangun URL publik dari storage_key.
+ * Memanggil endpoint konfirmasi dan menerjemahkan error jaringan/backend
+ * menjadi UploadError dengan pesan yang bisa ditampilkan ke pengguna.
  */
-export async function confirmPhotoUpload({
-  eventId,
-  storageKey,
-  uploader,
-  blurHash,
-}: ConfirmPhotoInput): Promise<Photo> {
+async function postConfirmation<T>(
+  path: string,
+  payload: unknown,
+): Promise<T> {
   try {
-    const response = await api.post<APIEnvelope<Photo>>('/api/media/confirm', {
-      event_id: eventId,
-      storage_key: storageKey,
-      ...(uploader ? { uploader } : {}),
-      ...(blurHash ? { blur_hash: blurHash } : {}),
-    })
+    const response = await api.post<APIEnvelope<T>>(path, payload)
 
     const body = response.data
 
@@ -167,6 +164,46 @@ export async function confirmPhotoUpload({
 
     throw new UploadError('Gagal menyimpan foto ke event.')
   }
+}
+
+/**
+ * Menyimpan metadata foto ke MongoDB lewat API setelah object berhasil
+ * di-upload ke R2. Server yang membangun URL publik dari storage_key.
+ */
+export async function confirmPhotoUpload({
+  eventId,
+  storageKey,
+  uploader,
+  blurHash,
+}: ConfirmPhotoInput): Promise<Photo> {
+  return postConfirmation<Photo>('/api/media/confirm', {
+    event_id: eventId,
+    storage_key: storageKey,
+    ...(uploader ? { uploader } : {}),
+    ...(blurHash ? { blur_hash: blurHash } : {}),
+  })
+}
+
+export interface ConfirmPhotosBatchInput {
+  eventId: string
+  uploader?: string
+  photos: BatchPhotoInput[]
+}
+
+/**
+ * Mengirim konfirmasi banyak foto sekaligus setelah semua PUT ke R2 selesai.
+ * Server mengembalikan item yang tersimpan dan item yang gagal secara terpisah.
+ */
+export async function confirmPhotosBatch({
+  eventId,
+  uploader,
+  photos,
+}: ConfirmPhotosBatchInput): Promise<BatchConfirmResult> {
+  return postConfirmation<BatchConfirmResult>('/api/media/confirm-batch', {
+    event_id: eventId,
+    ...(uploader ? { uploader } : {}),
+    photos,
+  })
 }
 
 export interface UploadPhotoOptions {
