@@ -161,7 +161,6 @@ export default function EventDetailPage() {
         eventId={event.id}
         title="Galeri foto"
         emptyMessage="Belum ada foto yang diunggah ke event ini."
-        columns={4}
       />
     </main>
   );

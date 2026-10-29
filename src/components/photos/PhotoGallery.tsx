@@ -1,29 +1,23 @@
 
+import { useState } from "react";
 import { useEventPhotos } from "@/hooks/use-event-photos";
-import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import OptimizedImage from "@/components/photos/OptimizedImage";
+import GalleryGrid from "@/components/photos/GalleryGrid";
+import LightboxModal from "@/components/photos/LightboxModal";
 
 interface PhotoGalleryProps {
   eventId: string;
   title?: string;
   emptyMessage?: string;
-  columns?: 2 | 3 | 4 | 5;
 }
-
-const columnClasses = {
-  2: "grid-cols-2",
-  3: "grid-cols-2 sm:grid-cols-3",
-  4: "grid-cols-2 sm:grid-cols-3 md:grid-cols-4",
-  5: "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5",
-};
 
 export default function PhotoGallery({
   eventId,
   title = "Foto Event",
   emptyMessage = "Belum ada foto untuk event ini.",
-  columns = 4,
 }: PhotoGalleryProps) {
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+
   const {
     data,
     isPending,
@@ -36,18 +30,23 @@ export default function PhotoGallery({
   } = useEventPhotos({ eventId });
 
   const photos = data?.pages.flatMap((page) => page.items) ?? [];
+  const isLightboxOpen = selectedIndex !== null;
 
   return (
     <section className="space-y-4">
       <h2 className="text-xl font-semibold">{title}</h2>
 
       {isPending ? (
-        <div className={`grid ${columnClasses[columns]} gap-3`}>
+        <div className="columns-2 gap-3 md:columns-3 lg:columns-4 2xl:columns-5">
           {Array.from({ length: 8 }, (_, index) => (
-            <div
-              key={index}
-              className="aspect-square animate-pulse rounded-xl bg-muted"
-            />
+            <div key={index} className="mb-3 break-inside-avoid">
+              <div
+                className="w-full animate-pulse rounded-xl bg-muted"
+                style={{
+                  aspectRatio: index % 3 === 0 ? "3 / 4" : "4 / 3",
+                }}
+              />
+            </div>
           ))}
         </div>
       ) : isError ? (
@@ -67,39 +66,35 @@ export default function PhotoGallery({
         </div>
       ) : photos.length === 0 ? (
         <div className="rounded-xl border border-dashed p-8 text-center">
-          <p className="text-sm text-muted-foreground">
-            {emptyMessage}
-          </p>
+          <p className="text-sm text-muted-foreground">{emptyMessage}</p>
         </div>
       ) : (
         <>
-          <div className={`grid ${columnClasses[columns]} gap-3`}>
-            {photos.map((photo) => (
-              <Card key={photo.id} className="overflow-hidden p-0">
-                <OptimizedImage
-                  src={photo.thumbnail_url || photo.url}
-                  blurHash={photo.blur_hash}
-                  alt={`Foto event ${title}`}
-                  className="aspect-square w-full transition-transform duration-200 hover:scale-105"
-                />
-              </Card>
-            ))}
-          </div>
+          <GalleryGrid
+            photos={photos}
+            title={title}
+            onPhotoClick={setSelectedIndex}
+          />
 
           {hasNextPage && (
-            <div className="flex justify-center">
+            <div className="flex justify-center pt-2">
               <Button
                 type="button"
                 variant="outline"
                 onClick={() => void fetchNextPage()}
-                disabled={isFetchingNextPage}
+                disabled={isFetchingNextPage || isFetching}
               >
-                {isFetchingNextPage
-                  ? "Memuat foto..."
-                  : "Muat lebih banyak"}
+                {isFetchingNextPage ? "Memuat foto..." : "Muat lebih banyak"}
               </Button>
             </div>
           )}
+
+          <LightboxModal
+            photos={photos}
+            initialIndex={selectedIndex ?? 0}
+            isOpen={isLightboxOpen}
+            onClose={() => setSelectedIndex(null)}
+          />
         </>
       )}
     </section>
