@@ -2,6 +2,7 @@
 import { useEventPhotos } from "@/hooks/use-event-photos";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import OptimizedImage from "@/components/photos/OptimizedImage";
 
 interface PhotoGalleryProps {
   eventId: string;
@@ -75,11 +76,11 @@ export default function PhotoGallery({
           <div className={`grid ${columnClasses[columns]} gap-3`}>
             {photos.map((photo) => (
               <Card key={photo.id} className="overflow-hidden p-0">
-                <img
+                <OptimizedImage
                   src={photo.thumbnail_url || photo.url}
+                  blurHash={photo.blur_hash}
                   alt={`Foto event ${title}`}
-                  loading="lazy"
-                  className="aspect-square w-full object-cover transition-transform duration-200 hover:scale-105"
+                  className="aspect-square w-full transition-transform duration-200 hover:scale-105"
                 />
               </Card>
             ))}
