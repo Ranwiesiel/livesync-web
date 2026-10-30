@@ -36,3 +36,5 @@ coverage/
 
 # Operating system files
 Thumbs.db
+
+*.test.*
