@@ -89,12 +89,14 @@ export default function PhotoGallery({
             </div>
           )}
 
-          <LightboxModal
-            photos={photos}
-            initialIndex={selectedIndex ?? 0}
-            isOpen={isLightboxOpen}
-            onClose={() => setSelectedIndex(null)}
-          />
+          {isLightboxOpen && (
+            <LightboxModal
+              photos={photos}
+              initialIndex={selectedIndex ?? 0}
+              isOpen
+              onClose={() => setSelectedIndex(null)}
+            />
+          )}
         </>
       )}
     </section>
