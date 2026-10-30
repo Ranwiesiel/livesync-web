@@ -1,5 +1,8 @@
 
 import { useCallback, useEffect, useState } from "react";
+import { Info } from "lucide-react";
+
+import PhotoInfoDrawer from "@/components/photos/PhotoInfoDrawer";
 import type { Photo } from "@/types/photo";
 
 interface LightboxModalProps {
@@ -51,12 +54,14 @@ export default function LightboxModal({
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [isInfoOpen, setIsInfoOpen] = useState(false);
 
   const goPrevious = useCallback(() => {
     setCurrentIndex((index) =>
       index > 0 ? index - 1 : photos.length - 1,
     );
     setDownloadError(null);
+    setIsInfoOpen(false);
   }, [photos.length]);
 
   const goNext = useCallback(() => {
@@ -64,6 +69,7 @@ export default function LightboxModal({
       index < photos.length - 1 ? index + 1 : 0,
     );
     setDownloadError(null);
+    setIsInfoOpen(false);
   }, [photos.length]);
 
   useEffect(() => {
@@ -82,7 +88,15 @@ export default function LightboxModal({
         return;
       }
 
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") {
+        // Escape menutup drawer info lebih dulu, baru lightbox-nya.
+        if (isInfoOpen) {
+          setIsInfoOpen(false);
+          return;
+        }
+
+        onClose();
+      }
       if (event.key === "ArrowLeft") goPrevious();
       if (event.key === "ArrowRight") goNext();
     };
@@ -93,7 +107,7 @@ export default function LightboxModal({
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [isOpen, onClose, goPrevious, goNext]);
+  }, [isOpen, onClose, goPrevious, goNext, isInfoOpen]);
 
   const downloadOriginal = useCallback(async () => {
     const photo = photos[currentIndex];
@@ -192,6 +206,17 @@ export default function LightboxModal({
         <div className="flex items-center gap-2">
           <button
             type="button"
+            onClick={() => setIsInfoOpen((open) => !open)}
+            aria-label="Info foto"
+            aria-expanded={isInfoOpen}
+            aria-controls="photo-info-drawer"
+            className="flex size-10 shrink-0 items-center justify-center rounded-full text-white/80 hover:bg-white/10 hover:text-white"
+          >
+            <Info aria-hidden="true" className="size-5" />
+          </button>
+
+          <button
+            type="button"
             onClick={() => void downloadOriginal()}
             disabled={isDownloading}
             className="rounded-lg border border-white/30 px-3 py-2 text-sm hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
@@ -257,6 +282,12 @@ export default function LightboxModal({
           ›
         </button>
       </div>
+
+      <PhotoInfoDrawer
+        photo={photo}
+        isOpen={isInfoOpen}
+        onClose={() => setIsInfoOpen(false)}
+      />
     </div>
   );
 }

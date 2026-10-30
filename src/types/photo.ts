@@ -1,4 +1,14 @@
 
+export interface PhotoExif {
+  camera_make?: string;
+  camera_model?: string;
+  lens_model?: string;
+  date_time_original?: string;
+  iso?: number;
+  aperture?: number;
+  shutter_speed?: string;
+}
+
 export interface Photo {
   id: string;
   event_id: string;
@@ -10,6 +20,7 @@ export interface Photo {
   blur_hash?: string;
   uploader: string;
   created_at: string;
+  exif?: PhotoExif;
 }
 
 export interface ApiResponse<T> {
