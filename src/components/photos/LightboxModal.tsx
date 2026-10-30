@@ -52,13 +52,6 @@ export default function LightboxModal({
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (isOpen) {
-      setCurrentIndex(initialIndex);
-      setDownloadError(null);
-    }
-  }, [initialIndex, isOpen]);
-
   const goPrevious = useCallback(() => {
     setCurrentIndex((index) =>
       index > 0 ? index - 1 : photos.length - 1,
@@ -114,10 +107,10 @@ export default function LightboxModal({
 
     try {
       // Ambil gambar asli dari URL R2 menggunakan CORS.
+      // no-store penting: URL yang sama sudah dimuat <img> tanpa crossOrigin,
+      // dan entri cache non-CORS itu akan membuat fetch ini gagal.
       const response = await fetch(photo.url, {
-        method: "GET",
-        mode: "cors",
-        credentials: "omit",
+        cache: "no-store",
       });
 
       if (!response.ok) {
