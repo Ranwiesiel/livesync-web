@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type SyntheticEvent } from 'react'
 import { Blurhash } from 'react-blurhash'
 
 import { cn } from '@/lib/utils'
@@ -9,6 +9,7 @@ interface OptimizedImageProps {
   alt: string
   className?: string
   imgClassName?: string
+  onLoad?: (event: SyntheticEvent<HTMLImageElement>) => void
 }
 
 /**
@@ -23,6 +24,7 @@ export default function OptimizedImage({
   alt,
   className,
   imgClassName,
+  onLoad,
 }: OptimizedImageProps) {
   const [loadedSrc, setLoadedSrc] = useState<string | null>(null)
   const [failedSrc, setFailedSrc] = useState<string | null>(null)
@@ -44,7 +46,10 @@ export default function OptimizedImage({
         alt={alt}
         loading="lazy"
         decoding="async"
-        onLoad={() => setLoadedSrc(src)}
+        onLoad={(event) => {
+          setLoadedSrc(src)
+          onLoad?.(event)
+        }}
         onError={() => setFailedSrc(src)}
         className={cn(
           'absolute inset-0 h-full w-full object-cover transition-opacity duration-500',

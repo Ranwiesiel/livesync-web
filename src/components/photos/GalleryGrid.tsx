@@ -1,6 +1,7 @@
 
 import { useState } from "react";
 import { Card } from "@/components/ui/card";
+import OptimizedImage from "@/components/photos/OptimizedImage";
 import type { Photo } from "@/types/photo";
 
 interface GalleryGridProps {
@@ -35,13 +36,11 @@ function GalleryPhoto({ photo, title, onClick }: GalleryPhotoProps) {
           className="relative w-full overflow-hidden bg-muted"
           style={{ aspectRatio: `${aspectRatio}` }}
         >
-          <img
+          <OptimizedImage
             src={photo.thumbnail_url || photo.url}
+            blurHash={photo.blur_hash}
             alt={`Foto event ${title}`}
-            loading="lazy"
-            decoding="async"
-            width={photo.width || undefined}
-            height={photo.height || undefined}
+            className="absolute inset-0 transition-transform duration-200 hover:scale-105"
             onLoad={(event) => {
               const image = event.currentTarget;
 
@@ -49,7 +48,6 @@ function GalleryPhoto({ photo, title, onClick }: GalleryPhotoProps) {
                 setAspectRatio(image.naturalWidth / image.naturalHeight);
               }
             }}
-            className="absolute inset-0 h-full w-full object-cover transition-transform duration-200 hover:scale-105"
           />
         </div>
       </Card>
