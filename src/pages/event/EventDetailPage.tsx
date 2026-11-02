@@ -15,7 +15,10 @@ import RoomQRCode from "@/components/event/RoomQRCode";
 import DropzoneModal from "@/components/photos/DropzoneModal";
 import PhotoGallery from "@/components/photos/PhotoGallery";
 
-import { EventWebSocketProvider } from "@/contexts/EventWebsocketContext";
+import {
+  EventWebSocketProvider,
+  useEventWebSocketContext,
+} from "@/contexts/EventWebsocketContext";
 import EventConnectionStatus from "@/components/event/EventConnectionStatus";
 
 export default function EventDetailPage() {
@@ -46,6 +49,7 @@ interface EventDetailContentProps {
 
 function EventDetailContent({ code }: EventDetailContentProps) {
   const queryClient = useQueryClient();
+  const { recentPhotoIds } = useEventWebSocketContext();
   const [uploadOpen, setUploadOpen] = useState(false);
 
   const eventQuery = useQuery({
@@ -193,6 +197,7 @@ function EventDetailContent({ code }: EventDetailContentProps) {
         eventId={event.id}
         title="Galeri foto"
         emptyMessage="Belum ada foto yang diunggah ke event ini."
+        highlightedPhotoIds={recentPhotoIds}
       />
     </main>
   );

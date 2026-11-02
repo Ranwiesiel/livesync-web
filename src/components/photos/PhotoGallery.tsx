@@ -9,12 +9,15 @@ interface PhotoGalleryProps {
   eventId: string;
   title?: string;
   emptyMessage?: string;
+  /** ID foto yang baru masuk dan perlu diberi highlight sementara. */
+  highlightedPhotoIds?: string[];
 }
 
 export default function PhotoGallery({
   eventId,
   title = "Foto Event",
   emptyMessage = "Belum ada foto untuk event ini.",
+  highlightedPhotoIds,
 }: PhotoGalleryProps) {
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
 
@@ -74,6 +77,7 @@ export default function PhotoGallery({
             photos={photos}
             title={title}
             onPhotoClick={setSelectedIndex}
+            highlightedPhotoIds={highlightedPhotoIds}
           />
 
           {hasNextPage && (

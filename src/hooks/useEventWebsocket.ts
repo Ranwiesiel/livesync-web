@@ -1,5 +1,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+
+import { addPhotoToCache, extractNewPhoto } from "@/lib/photo-cache";
 
 export type WebSocketStatus =
   | "connecting"
@@ -11,6 +14,8 @@ interface UseEventWebSocketReturn {
   status: WebSocketStatus;
   lastMessage: unknown;
   lastError: string | null;
+  /** ID foto yang baru masuk lewat WebSocket dan masih perlu di-highlight. */
+  recentPhotoIds: string[];
   sendMessage: (message: unknown) => boolean;
   reconnect: () => void;
 }
@@ -18,13 +23,23 @@ interface UseEventWebSocketReturn {
 const INITIAL_RECONNECT_DELAY = 1000;
 const MAX_RECONNECT_DELAY = 30000;
 
+/** Lama highlight kartu foto baru sebelum kembali normal. */
+export const NEW_PHOTO_HIGHLIGHT_MS = 6000;
+
 export function useEventWebSocket(
   eventCode: string
 ): UseEventWebSocketReturn {
+  const queryClient = useQueryClient();
+
   const socketRef = useRef<WebSocket | null>(null);
 
   const reconnectTimerRef =
     useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Timer per foto untuk melepas highlight setelah beberapa detik.
+  const highlightTimersRef = useRef<
+    Map<string, ReturnType<typeof setTimeout>>
+  >(new Map());
 
   const reconnectAttemptsRef = useRef(0);
   const shouldReconnectRef = useRef(false);
@@ -37,6 +52,7 @@ export function useEventWebSocket(
 
   const [lastMessage, setLastMessage] = useState<unknown>(null);
   const [lastError, setLastError] = useState<string | null>(null);
+  const [recentPhotoIds, setRecentPhotoIds] = useState<string[]>([]);
 
   // ==========================================
   // Membersihkan timer reconnect
@@ -47,6 +63,29 @@ export function useEventWebSocket(
       clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
     }
+  }, []);
+
+  // ==========================================
+  // Menandai foto baru agar kartunya di-highlight
+  // ==========================================
+
+  const markPhotoAsNew = useCallback((photoId: string) => {
+    setRecentPhotoIds((ids) =>
+      ids.includes(photoId) ? ids : [...ids, photoId]
+    );
+
+    const timers = highlightTimersRef.current;
+    const existingTimer = timers.get(photoId);
+
+    if (existingTimer) clearTimeout(existingTimer);
+
+    timers.set(
+      photoId,
+      setTimeout(() => {
+        timers.delete(photoId);
+        setRecentPhotoIds((ids) => ids.filter((id) => id !== photoId));
+      }, NEW_PHOTO_HIGHLIGHT_MS)
+    );
   }, []);
 
   // ==========================================
@@ -123,10 +162,22 @@ export function useEventWebSocket(
       socket.onmessage = (event: MessageEvent) => {
         if (socketRef.current !== socket) return;
 
+        let message: unknown = event.data;
+
         try {
-          setLastMessage(JSON.parse(event.data));
+          message = JSON.parse(event.data);
         } catch {
-          setLastMessage(event.data);
+          // Pesan non-JSON tetap diteruskan lewat lastMessage.
+        }
+
+        setLastMessage(message);
+
+        // NEW_PHOTO: sisipkan ke cache galeri dan tandai untuk highlight.
+        const newPhoto = extractNewPhoto(message);
+
+        if (newPhoto) {
+          addPhotoToCache(queryClient, newPhoto);
+          markPhotoAsNew(newPhoto.id);
         }
       };
 
@@ -178,7 +229,7 @@ export function useEventWebSocket(
 
       scheduleReconnect();
     }
-  }, [eventCode, clearReconnectTimer]);
+  }, [eventCode, clearReconnectTimer, queryClient, markPhotoAsNew]);
 
   // ==========================================
   // Menjadwalkan reconnect otomatis
@@ -265,6 +316,19 @@ export function useEventWebSocket(
   );
 
   // ==========================================
+  // Membersihkan timer highlight saat unmount
+  // ==========================================
+
+  useEffect(() => {
+    const timers = highlightTimersRef.current;
+
+    return () => {
+      timers.forEach((timer) => clearTimeout(timer));
+      timers.clear();
+    };
+  }, []);
+
+  // ==========================================
   // Lifecycle koneksi
   // ==========================================
 
@@ -314,6 +378,7 @@ export function useEventWebSocket(
     status,
     lastMessage,
     lastError,
+    recentPhotoIds,
     sendMessage,
     reconnect,
   };

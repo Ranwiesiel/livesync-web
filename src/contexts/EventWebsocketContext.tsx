@@ -14,6 +14,7 @@ interface EventWebSocketContextValue {
   status: WebSocketStatus;
   lastMessage: unknown;
   lastError: string | null;
+  recentPhotoIds: string[];
   sendMessage: (message: unknown) => boolean;
   reconnect: () => void;
 }
