@@ -13,8 +13,36 @@ import EventResultCard from "@/components/event/EventResultCard";
 import DropzoneModal from "@/components/photos/DropzoneModal";
 import PhotoGallery from "@/components/photos/PhotoGallery";
 
+import { EventWebSocketProvider } from "@/contexts/EventWebsocketContext";
+import EventConnectionStatus from "@/components/event/EventConnectionStatus";
+
 export default function EventDetailPage() {
   const { code = "" } = useParams<{ code: string }>();
+
+  // Validasi kode sebelum membuat koneksi WebSocket.
+  if (!/^\d{6}$/.test(code)) {
+    return (
+      <main className="mx-auto max-w-3xl p-6">
+        <p>Kode event tidak valid.</p>
+        <Button asChild className="mt-4">
+          <Link to="/events/join">Kembali ke halaman join</Link>
+        </Button>
+      </main>
+    );
+  }
+
+  return (
+    <EventWebSocketProvider eventCode={code}>
+      <EventDetailContent code={code} />
+    </EventWebSocketProvider>
+  );
+}
+
+interface EventDetailContentProps {
+  code: string;
+}
+
+function EventDetailContent({ code }: EventDetailContentProps) {
   const queryClient = useQueryClient();
   const [uploadOpen, setUploadOpen] = useState(false);
 
@@ -37,6 +65,8 @@ export default function EventDetailPage() {
     retry: false,
   });
 
+  const event = eventQuery.data;
+
   async function handlePhotoUploaded() {
     if (!event) return;
 
@@ -48,19 +78,6 @@ export default function EventDetailPage() {
         queryKey: ["event-photos", event.id],
       }),
     ]);
-  }
-
-  const event = eventQuery.data;
-
-  if (!/^\d{6}$/.test(code)) {
-    return (
-      <main className="mx-auto max-w-3xl p-6">
-        <p>Kode event tidak valid.</p>
-        <Button asChild className="mt-4">
-          <Link to="/events/join">Kembali ke halaman join</Link>
-        </Button>
-      </main>
-    );
   }
 
   if (eventQuery.isPending) {
@@ -85,6 +102,7 @@ export default function EventDetailPage() {
     return (
       <main className="mx-auto max-w-3xl space-y-4 p-6">
         <p className="text-sm text-destructive">{message}</p>
+
         <Button asChild variant="outline">
           <Link to="/events/join">Kembali ke halaman join</Link>
         </Button>
@@ -99,6 +117,7 @@ export default function EventDetailPage() {
           <p className="text-sm text-muted-foreground">
             LIVESYNC · EVENT
           </p>
+
           <h1 className="mt-1 text-2xl font-bold sm:text-3xl">
             {event.title}
           </h1>
@@ -108,6 +127,9 @@ export default function EventDetailPage() {
           <Link to="/events/join">Gabung event lain</Link>
         </Button>
       </header>
+
+      {/* Status koneksi WebSocket */}
+      <EventConnectionStatus />
 
       <EventResultCard
         title="Informasi event"
@@ -137,12 +159,16 @@ export default function EventDetailPage() {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 className="text-xl font-semibold">Unggah foto</h2>
+
               <p className="text-sm text-muted-foreground">
                 Bagikan banyak foto sekaligus ke galeri event ini.
               </p>
             </div>
 
-            <Button type="button" onClick={() => setUploadOpen(true)}>
+            <Button
+              type="button"
+              onClick={() => setUploadOpen(true)}
+            >
               Tambah foto
             </Button>
           </div>
