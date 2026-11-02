@@ -86,3 +86,14 @@ body {
     @apply bg-background text-foreground antialiased;
   }
 }
+
+/* Crossfade foto pada halaman proyektor. */
+@keyframes projector-fade {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}

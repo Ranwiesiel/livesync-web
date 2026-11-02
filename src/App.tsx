@@ -15,6 +15,7 @@ import {
 import CreateEventPage from '@/pages/event/CreateEventPage'
 import JoinEventPage from '@/pages/event/JoinEventPage'
 import EventDetailPage from '@/pages/event/EventDetailPage'
+import ProjectorPage from '@/pages/event/ProjectorPage'
 
 function HomePage() {
   return (
@@ -73,6 +74,7 @@ function App() {
         <Route path="/events/create" element={<CreateEventPage />} />
         <Route path="/events/join" element={<JoinEventPage />} />
         <Route path="/events/detail/:code" element={<EventDetailPage />} />
+        <Route path="/events/:code/projector" element={<ProjectorPage />} />
       </Routes>
     </BrowserRouter>
   )

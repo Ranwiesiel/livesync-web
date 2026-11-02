@@ -129,9 +129,17 @@ function EventDetailContent({ code }: EventDetailContentProps) {
           </h1>
         </div>
 
-        <Button asChild variant="outline">
-          <Link to="/events/join">Gabung event lain</Link>
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button asChild variant="outline">
+            <Link to={`/events/${encodeURIComponent(code)}/projector`}>
+              Mode proyektor
+            </Link>
+          </Button>
+
+          <Button asChild variant="outline">
+            <Link to="/events/join">Gabung event lain</Link>
+          </Button>
+        </div>
       </header>
 
       {/* Status koneksi WebSocket */}
