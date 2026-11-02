@@ -24,6 +24,7 @@
     "cn": "^0.5.0",
     "lucide-react": "^1.61.0",
     "postcss": "^8.5.31",
+    "qrcode.react": "^4.2.0",
     "react": "^19.3.1",
     "react-blurhash": "^0.3.0",
     "react-dom": "^19.3.1",

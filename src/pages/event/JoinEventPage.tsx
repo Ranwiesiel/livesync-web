@@ -1,10 +1,11 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 
 import { api } from "@/services/api";
+import { readJoinCode } from "@/lib/join-url";
 import type { ApiResponse, Event } from "@/types/event";
 
 import { Button } from "@/components/ui/button";
@@ -30,8 +31,12 @@ function getErrorMessage(error: unknown): string {
 }
 
 export default function JoinEventPage() {
-  const [code, setCode] = useState("");
-  const [submittedCode, setSubmittedCode] = useState("");
+  const [searchParams] = useSearchParams();
+  // QR room mengarah ke /events/join?code=123456 — langsung cari event-nya.
+  const codeFromUrl = readJoinCode(searchParams.toString());
+
+  const [code, setCode] = useState(codeFromUrl);
+  const [submittedCode, setSubmittedCode] = useState(codeFromUrl);
   const navigate = useNavigate();
 
   const eventQuery = useQuery({

@@ -5,11 +5,13 @@ import { Link, useParams } from "react-router-dom";
 import axios from "axios";
 
 import { api } from "@/services/api";
+import { buildJoinUrl } from "@/lib/join-url";
 import type { ApiResponse, Event } from "@/types/event";
 
 import { Button } from "@/components/ui/button";
 import EventFeedback from "@/components/event/EventFeedback";
 import EventResultCard from "@/components/event/EventResultCard";
+import RoomQRCode from "@/components/event/RoomQRCode";
 import DropzoneModal from "@/components/photos/DropzoneModal";
 import PhotoGallery from "@/components/photos/PhotoGallery";
 
@@ -135,22 +137,26 @@ function EventDetailContent({ code }: EventDetailContentProps) {
         title="Informasi event"
         description="Informasi event berdasarkan PIN yang digunakan."
       >
-        <div className="space-y-4">
-          <div className="room-code">
-            <span className="room-code__label">KODE ROOM</span>
-            <strong className="room-code__value">{event.code}</strong>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0 flex-1 space-y-4">
+            <div className="room-code">
+              <span className="room-code__label">KODE ROOM</span>
+              <strong className="room-code__value">{event.code}</strong>
+            </div>
+
+            {event.is_active ? (
+              <EventFeedback type="success">
+                Event aktif dan tersedia.
+              </EventFeedback>
+            ) : (
+              <EventFeedback type="info">
+                Event ini sedang tidak aktif. Foto yang sudah tersedia
+                masih dapat dilihat.
+              </EventFeedback>
+            )}
           </div>
 
-          {event.is_active ? (
-            <EventFeedback type="success">
-              Event aktif dan tersedia.
-            </EventFeedback>
-          ) : (
-            <EventFeedback type="info">
-              Event ini sedang tidak aktif. Foto yang sudah tersedia
-              masih dapat dilihat.
-            </EventFeedback>
-          )}
+          <RoomQRCode url={buildJoinUrl(event.code)} code={event.code} />
         </div>
       </EventResultCard>
 

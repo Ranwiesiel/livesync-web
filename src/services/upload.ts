@@ -30,6 +30,7 @@ export interface PresignedUpload {
 
 export interface BatchPhotoInput {
   storage_key: string
+  blur_hash?: string
 }
 
 export interface ConfirmedPhoto {
