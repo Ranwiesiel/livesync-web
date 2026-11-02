@@ -1,5 +1,7 @@
+
 import { useCallback, useEffect, useRef } from 'react'
-import { useDropzone } from 'react-dropzone'
+import { useDropzone, type FileRejection } from 'react-dropzone'
+import { toast } from 'sonner'
 import { Check, ImagePlus, Loader2, RotateCcw, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -21,10 +23,9 @@ const ACCEPT = {
   'image/jpeg': ['.jpg', '.jpeg'],
   'image/png': ['.png'],
   'image/webp': ['.webp'],
-  'image/gif': ['.gif'],
-  'image/heic': ['.heic'],
-  'image/heif': ['.heif'],
 }
+
+const MAX_FILES = 50
 
 const ACTIVE_STATUSES = new Set<UploadItem['status']>([
   'pending',
@@ -36,6 +37,7 @@ const ACTIVE_STATUSES = new Set<UploadItem['status']>([
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
@@ -55,6 +57,21 @@ function statusLabel(item: UploadItem): string {
         : 'Selesai'
     case 'error':
       return 'Gagal'
+  }
+}
+
+function rejectionMessage(rejection: FileRejection): string {
+  const errorCode = rejection.errors[0]?.code
+
+  switch (errorCode) {
+    case 'file-too-large':
+      return `File "${rejection.file.name}" melebihi batas maksimal 20 MB.`
+    case 'file-invalid-type':
+      return `Format file "${rejection.file.name}" tidak didukung. Gunakan JPG, PNG, atau WEBP.`
+    case 'too-many-files':
+      return `Maksimal ${MAX_FILES} file dalam satu batch.`
+    default:
+      return `File "${rejection.file.name}" tidak dapat ditambahkan.`
   }
 }
 
@@ -89,8 +106,10 @@ export default function DropzoneModal({
     }
 
     document.addEventListener('keydown', onKeyDown)
+
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
+
     dialogRef.current?.focus()
 
     return () => {
@@ -99,10 +118,35 @@ export default function DropzoneModal({
     }
   }, [open, requestClose])
 
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop: (accepted) => addFiles(accepted),
+  const handleDrop = useCallback(
+    (accepted: File[], rejected: FileRejection[]) => {
+      if (rejected.length > 0) {
+        const messages = rejected.map(rejectionMessage)
+
+        toast.error(`${rejected.length} file ditolak`, {
+          description: messages.join('\n'),
+          duration: 5000,
+        })
+      }
+
+      if (accepted.length > 0) {
+        addFiles(accepted)
+      }
+    },
+    [addFiles],
+  )
+
+  const {
+    getRootProps,
+    getInputProps,
+    isDragActive,
+  } = useDropzone({
+    onDrop: handleDrop,
     accept: ACCEPT,
+    maxSize: 20 * 1024 * 1024,
+    maxFiles: MAX_FILES,
     multiple: true,
+    disabled: busy,
   })
 
   if (!open) return null
@@ -128,9 +172,10 @@ export default function DropzoneModal({
             <h2 id="dropzone-title" className="text-lg font-semibold">
               Unggah banyak foto
             </h2>
+
             <p className="text-sm text-muted-foreground">
-              Tarik file ke area di bawah atau klik untuk memilih. Maksimal 50
-              file per batch.
+              Tarik file ke area di bawah atau klik untuk memilih.
+              Maksimal 50 file per batch, 20 MB per file.
             </p>
           </div>
 
@@ -152,18 +197,22 @@ export default function DropzoneModal({
             data-testid="dropzone"
             className={cn(
               'flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed p-8 text-center transition-colors',
+              busy && 'cursor-not-allowed opacity-50',
               isDragActive
                 ? 'border-primary bg-primary/5'
                 : 'bg-muted/30 hover:bg-muted/50',
             )}
           >
             <input {...getInputProps()} />
+
             <ImagePlus className="size-8 text-muted-foreground" />
+
             <p className="text-sm font-medium">
               {isDragActive ? 'Lepaskan file di sini' : 'Tarik & lepas foto'}
             </p>
+
             <p className="text-xs text-muted-foreground">
-              JPG, PNG, WEBP, GIF, HEIC, HEIF
+              JPG, PNG, WEBP · Maksimal 20 MB per file
             </p>
           </div>
 
@@ -179,11 +228,13 @@ export default function DropzoneModal({
                     alt=""
                     className="size-14 shrink-0 rounded-md border object-cover"
                   />
+
                   <div className="min-w-0 flex-1 space-y-1">
                     <div className="flex items-center justify-between gap-2">
                       <p className="truncate text-sm font-medium">
                         {item.file.name}
                       </p>
+
                       <span
                         className={cn(
                           'shrink-0 text-xs',
@@ -200,6 +251,7 @@ export default function DropzoneModal({
                       {formatSize(item.file.size)}
                       {item.status === 'done' ? ' · tersimpan' : ''}
                     </p>
+
                     {item.status === 'uploading' && (
                       <div
                         role="progressbar"
@@ -211,13 +263,11 @@ export default function DropzoneModal({
                       >
                         <div
                           className="h-full bg-primary transition-[width] duration-150"
-                          style={{ width: `${Math.round(item.progress * 100)}%` }}
+                          style={{
+                            width: `${Math.round(item.progress * 100)}%`,
+                          }}
                         />
                       </div>
-                    )}
-
-                    {item.status === 'error' && item.error && (
-                      <p className="text-xs text-destructive">{item.error}</p>
                     )}
                   </div>
 
@@ -235,7 +285,8 @@ export default function DropzoneModal({
                       variant="ghost"
                       onClick={() => retry(item.id)}
                     >
-                      <RotateCcw /> Coba lagi
+                      <RotateCcw />
+                      Coba lagi
                     </Button>
                   )}
 

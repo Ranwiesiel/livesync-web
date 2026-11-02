@@ -1,5 +1,6 @@
 
 import { BrowserRouter, Routes, Route, Link } from 'react-router-dom'
+import { Toaster } from "sonner"
 
 import { Button } from '@/components/ui/button'
 import {
@@ -44,7 +45,7 @@ function HomePage() {
         </CardContent>
 
         <CardFooter className="justify-center border-t pt-6 text-xs text-muted-foreground">
-          JPG, PNG, WEBP, GIF, HEIC, HEIF · URL upload berlaku 15 menit
+          JPG, PNG, WEBP · URL upload berlaku 15 menit
         </CardFooter>
       </Card>
     </main>
@@ -54,6 +55,13 @@ function HomePage() {
 function App() {
   return (
     <BrowserRouter>
+      <Toaster
+        position="top-right"
+        richColors
+        closeButton
+        duration={4000}
+        visibleToasts={5}
+      />
       <nav className="flex flex-wrap justify-center gap-4 border-b p-4">
         <Link to="/">Gallery</Link>
         <Link to="/events/create">Buat Event</Link>

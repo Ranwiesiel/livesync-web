@@ -1,186 +1,284 @@
-import { useEffect, useRef, useState, type ChangeEvent } from 'react'
-import { Loader2, Upload } from 'lucide-react'
 
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { uploadPhoto } from '@/services/upload'
-import type { Photo } from '@/types/photo'
+import axios from 'axios'
 
-type Status = 'idle' | 'uploading' | 'success' | 'error'
+import { api } from '@/services/api'
 
-const ACCEPT = [
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-  'image/gif',
-  'image/heic',
-  'image/heif',
-].join(',')
+export const MAX_FILE_SIZE = 20 * 1024 * 1024
 
-interface FileUploadButtonProps {
-  /** Event yang akan menerima foto. Upload tanpa event tidak bisa disimpan. */
-  eventId: string
-  uploader?: string
-  onUploaded?: (photo: Photo) => void
+const ALLOWED_TYPES: Record<string, string> = {
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png': 'image/png',
+  '.webp': 'image/webp',
 }
 
-function FileUploadButton({
-  eventId,
-  uploader,
-  onUploaded,
-}: FileUploadButtonProps) {
-  const inputRef = useRef<HTMLInputElement>(null)
-  const uploadRef = useRef(0)
-  const previewRef = useRef<string | null>(null)
+export class UploadError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'UploadError'
+  }
+}
 
-  const [file, setFile] = useState<File | null>(null)
-  const [preview, setPreview] = useState<string | null>(null)
-  const [status, setStatus] = useState<Status>('idle')
-  const [progress, setProgress] = useState(0)
-  const [uploadedPhoto, setUploadedPhoto] = useState<Photo | null>(null)
-  const [error, setError] = useState<string | null>(null)
+export interface PresignedUpload {
+  upload_url: string
+  method: 'PUT'
+  key: string
+  content_type: string
+  expires_in: number
+  expires_at: string
+}
 
-  useEffect(() => {
-    return () => {
-      if (previewRef.current) URL.revokeObjectURL(previewRef.current)
-    }
-  }, [])
+export interface BatchPhotoInput {
+  storage_key: string
+}
 
-  function gantiPreview(url: string | null) {
-    if (previewRef.current) URL.revokeObjectURL(previewRef.current)
-    previewRef.current = url
-    setPreview(url)
+export interface ConfirmedPhoto {
+  storage_key: string
+  thumbnail_url?: string | null
+}
+
+export interface BatchConfirmResult {
+  items: ConfirmedPhoto[]
+  failed: {
+    storage_key: string
+    message: string
+  }[]
+}
+
+interface ApiResponse<T> {
+  success: boolean
+  data: T
+  error: {
+    message: string
+  } | null
+}
+
+function getExtension(filename: string): string {
+  const dotIndex = filename.lastIndexOf('.')
+  return dotIndex >= 0 ? filename.slice(dotIndex).toLowerCase() : ''
+}
+
+export function validateUploadFile(file: File): void {
+  const extension = getExtension(file.name)
+  const expectedType = ALLOWED_TYPES[extension]
+
+  if (!expectedType) {
+    throw new UploadError(
+      `Format file "${file.name}" tidak didukung. Gunakan JPG, PNG, atau WEBP.`,
+    )
   }
 
-  async function mulaiUpload(target: File) {
-    const id = ++uploadRef.current
+  if (file.size === 0) {
+    throw new UploadError(`File "${file.name}" kosong dan tidak dapat diunggah.`)
+  }
 
-    setStatus('uploading')
-    setProgress(0)
-    setUploadedPhoto(null)
-    setError(null)
+  if (file.size > MAX_FILE_SIZE) {
+    throw new UploadError(
+      `File "${file.name}" melebihi batas maksimal 20 MB.`,
+    )
+  }
 
-    try {
-      const saved = await uploadPhoto(target, {
-        eventId,
-        uploader,
-        onProgress: (fraction) => {
-          if (uploadRef.current === id) setProgress(fraction)
-        },
-      })
+  if (file.type && file.type !== expectedType) {
+    throw new UploadError(
+      `Tipe file "${file.name}" tidak sesuai dengan ekstensinya.`,
+    )
+  }
+}
 
-      if (uploadRef.current !== id) return
+function detectContentType(file: File): string {
+  validateUploadFile(file)
 
-      setProgress(1)
-      setUploadedPhoto(saved)
-      setStatus('success')
-      onUploaded?.(saved)
-    } catch (cause) {
-      if (uploadRef.current !== id) return
+  const extension = getExtension(file.name)
+  return ALLOWED_TYPES[extension]
+}
 
-      setStatus('error')
-      setError(
-        cause instanceof Error ? cause.message : 'Upload gagal. Coba lagi.',
+function getApiErrorMessage(error: unknown): string | undefined {
+  if (!axios.isAxiosError(error)) return undefined
+
+  const responseData = error.response?.data as
+    | ApiResponse<unknown>
+    | { message?: string; error?: { message?: string } }
+    | undefined
+
+  if (!responseData) return undefined
+
+  if ('error' in responseData && responseData.error?.message) {
+    return responseData.error.message
+  }
+
+  if ('message' in responseData && responseData.message) {
+    return responseData.message
+  }
+
+  return undefined
+}
+
+export function normalizeUploadError(error: unknown): UploadError {
+  if (error instanceof UploadError) return error
+
+  const serverMessage = getApiErrorMessage(error)
+
+  if (serverMessage) {
+    return new UploadError(serverMessage)
+  }
+
+  if (axios.isAxiosError(error)) {
+    if (!error.response) {
+      return new UploadError(
+        'Tidak dapat terhubung ke server. Periksa koneksi internet Anda.',
       )
     }
+
+    switch (error.response.status) {
+      case 400:
+        return new UploadError('Data upload tidak valid.')
+      case 401:
+        return new UploadError('Sesi Anda telah berakhir. Silakan login kembali.')
+      case 403:
+        return new UploadError('Anda tidak memiliki izin untuk mengunggah foto.')
+      case 413:
+        return new UploadError('Ukuran file melebihi batas maksimal 20 MB.')
+      case 415:
+        return new UploadError('Format file tidak didukung oleh server.')
+      default:
+        return new UploadError('Terjadi kesalahan pada server saat mengunggah foto.')
+    }
   }
 
-  function pilihFile(event: ChangeEvent<HTMLInputElement>) {
-    const target = event.target.files?.[0]
-    // Reset supaya file yang sama bisa dipilih ulang.
-    event.target.value = ''
-
-    if (!target) return
-
-    setFile(target)
-    gantiPreview(URL.createObjectURL(target))
-    void mulaiUpload(target)
+  if (error instanceof Error && error.message) {
+    return new UploadError(error.message)
   }
 
-  const persen = Math.round(progress * 100)
-  const sedangUpload = status === 'uploading'
-
-  return (
-    <div className="flex flex-col items-center gap-4 rounded-lg border border-dashed bg-muted/30 p-6">
-      <Input
-        ref={inputRef}
-        type="file"
-        accept={ACCEPT}
-        className="sr-only"
-        onChange={pilihFile}
-      />
-
-      {preview && (
-        <img
-          className="max-h-56 w-full max-w-sm rounded-md border bg-background object-contain"
-          src={preview}
-          alt="Pratinjau file"
-        />
-      )}
-
-      {file && (
-        <p
-          className="max-w-full truncate text-sm text-muted-foreground"
-          title={file.name}
-        >
-          {file.name}
-        </p>
-      )}
-
-      <Button
-        type="button"
-        disabled={sedangUpload}
-        onClick={() => inputRef.current?.click()}
-      >
-        {sedangUpload ? (
-          <Loader2 className="animate-spin" />
-        ) : (
-          <Upload />
-        )}
-        {sedangUpload
-          ? 'Mengunggah…'
-          : status === 'idle'
-            ? 'Pilih foto'
-            : 'Pilih foto lain'}
-      </Button>
-
-      {sedangUpload && (
-        <div className="w-full max-w-sm space-y-1.5">
-          <div
-            className="h-2.5 w-full overflow-hidden rounded-full bg-secondary"
-            role="progressbar"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={persen}
-            aria-label="Progress upload"
-          >
-            <div
-              className="h-full bg-primary transition-[width] duration-150"
-              style={{ width: `${persen}%` }}
-            />
-          </div>
-          <span className="block text-center text-xs text-muted-foreground">
-            {persen}%
-          </span>
-        </div>
-      )}
-
-      {status === 'success' && uploadedPhoto && (
-        <div className="flex flex-col items-center gap-1 text-sm text-emerald-600">
-          <strong>Upload berhasil.</strong>
-          <code className="max-w-full break-all rounded bg-muted px-2 py-1 font-mono text-xs text-foreground">
-            {uploadedPhoto.storage_key}
-          </code>
-        </div>
-      )}
-
-      {status === 'error' && error && (
-        <div role="alert" className="text-center text-sm text-destructive">
-          {error}
-        </div>
-      )}
-    </div>
-  )
+  return new UploadError('Upload gagal. Silakan coba lagi.')
 }
 
-export default FileUploadButton
+function unwrapResponse<T>(response: { data: ApiResponse<T> | T }): T {
+  const body = response.data
+
+  if (
+    body &&
+    typeof body === 'object' &&
+    'success' in body &&
+    'data' in body
+  ) {
+    const envelope = body as ApiResponse<T>
+
+    if (!envelope.success) {
+      throw new UploadError(
+        envelope.error?.message ?? 'Permintaan upload gagal.',
+      )
+    }
+
+    return envelope.data
+  }
+
+  return body as T
+}
+
+export async function requestPresignedUpload(
+  file: File,
+): Promise<PresignedUpload> {
+  try {
+    validateUploadFile(file)
+
+    const contentType = detectContentType(file)
+
+    const response = await api.post<ApiResponse<PresignedUpload>>(
+      '/api/media/presign-upload',
+      {
+        filename: file.name,
+        content_type: contentType,
+      },
+    )
+
+    return unwrapResponse(response)
+  } catch (error) {
+    throw normalizeUploadError(error)
+  }
+}
+
+export async function uploadToR2(
+  file: File,
+  presign: PresignedUpload,
+  onProgress?: (fraction: number) => void,
+): Promise<void> {
+  try {
+    validateUploadFile(file)
+
+    await axios.put(presign.upload_url, file, {
+      headers: {
+        'Content-Type': presign.content_type,
+      },
+      onUploadProgress: (event) => {
+        if (!event.total) return
+
+        const fraction = Math.min(event.loaded / event.total, 1)
+        onProgress?.(fraction)
+      },
+    })
+
+    onProgress?.(1)
+  } catch (error) {
+    throw normalizeUploadError(error)
+  }
+}
+
+export async function confirmPhotosBatch(input: {
+  eventId: string
+  uploader?: string
+  photos: BatchPhotoInput[]
+}): Promise<BatchConfirmResult> {
+  try {
+    const response = await api.post<ApiResponse<BatchConfirmResult>>(
+      '/api/media/confirm-batch',
+      {
+        event_id: input.eventId,
+        ...(input.uploader ? { uploader: input.uploader } : {}),
+        photos: input.photos,
+      },
+    )
+
+    return unwrapResponse(response)
+  } catch (error) {
+    throw normalizeUploadError(error)
+  }
+}
+
+export async function confirmPhotoUpload(input: {
+  eventId: string
+  storageKey: string
+  uploader?: string
+  blurHash?: string
+}): Promise<unknown> {
+  try {
+    const response = await api.post('/api/media/confirm', {
+      event_id: input.eventId,
+      storage_key: input.storageKey,
+      ...(input.uploader ? { uploader: input.uploader } : {}),
+      ...(input.blurHash ? { blur_hash: input.blurHash } : {}),
+    })
+
+    return unwrapResponse(response)
+  } catch (error) {
+    throw normalizeUploadError(error)
+  }
+}
+
+export async function uploadPhoto(
+  file: File,
+  input: {
+    eventId: string
+    uploader?: string
+  },
+): Promise<unknown> {
+  validateUploadFile(file)
+
+  const presign = await requestPresignedUpload(file)
+  await uploadToR2(file, presign)
+
+  return confirmPhotoUpload({
+    eventId: input.eventId,
+    storageKey: presign.key,
+    uploader: input.uploader,
+  })
+}

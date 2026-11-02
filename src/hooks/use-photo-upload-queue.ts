@@ -1,10 +1,14 @@
+
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
 
 import { photoService } from '@/services/photo.service'
 import {
   confirmPhotosBatch,
   requestPresignedUpload,
   uploadToR2,
+  validateUploadFile,
+  normalizeUploadError,
 } from '@/services/upload'
 
 export type UploadItemStatus =
@@ -20,11 +24,9 @@ export interface UploadItem {
   file: File
   previewUrl: string
   status: UploadItemStatus
-  /** 0..1, hanya bermakna saat status uploading. */
   progress: number
   storageKey?: string
   error?: string
-  /** true kalau foto sudah tersimpan tapi thumbnail belum selesai diproses. */
   thumbnailPending?: boolean
 }
 
@@ -32,9 +34,7 @@ export interface UsePhotoUploadQueueOptions {
   eventId: string
   uploader?: string
   onCompleted?: () => void
-  /** Jeda antar polling status thumbnail. */
   pollIntervalMs?: number
-  /** Batas waktu menunggu thumbnail sebelum file dianggap selesai. */
   pollTimeoutMs?: number
   concurrency?: number
 }
@@ -49,25 +49,14 @@ const DEFAULT_POLL_INTERVAL_MS = 2_000
 const DEFAULT_POLL_TIMEOUT_MS = 60_000
 const DEFAULT_CONCURRENCY = 3
 
-function errorMessage(error: unknown): string {
-  if (error instanceof Error && error.message) return error.message
-  return 'Upload gagal. Coba lagi.'
-}
-
 function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms)
-  })
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-/**
- * Mesin antrean upload banyak foto.
- *
- * Satu file melewati status: pending -> requesting_url -> uploading (0..100%)
- * -> processing -> done. Setelah semua upload selesai, metadata dikirim sekali
- * lewat endpoint batch confirm, lalu status processing dipantau dengan polling
- * galeri sampai worker selesai membuat thumbnail.
- */
+function getErrorMessage(error: unknown): string {
+  return normalizeUploadError(error).message
+}
+
 export function usePhotoUploadQueue({
   eventId,
   uploader,
@@ -91,20 +80,25 @@ export function usePhotoUploadQueue({
     onCompletedRef.current = onCompleted
   }, [onCompleted])
 
-  const patchItem = useCallback((id: string, patch: Partial<UploadItem>) => {
-    if (!activeRef.current) return
+  const patchItem = useCallback(
+    (id: string, patch: Partial<UploadItem>) => {
+      if (!activeRef.current) return
 
-    itemsRef.current = itemsRef.current.map((item) =>
-      item.id === id ? { ...item, ...patch } : item,
-    )
-    setItems(itemsRef.current)
-  }, [])
+      itemsRef.current = itemsRef.current.map((item) =>
+        item.id === id ? { ...item, ...patch } : item,
+      )
+
+      setItems(itemsRef.current)
+    },
+    [],
+  )
 
   const finishItem = useCallback(
     (storageKey: string, thumbnailPending: boolean) => {
       const item = itemsRef.current.find(
         (candidate) => candidate.storageKey === storageKey,
       )
+
       if (!item) return
 
       patchItem(item.id, {
@@ -120,6 +114,7 @@ export function usePhotoUploadQueue({
   const pollProcessing = useCallback(
     async (storageKeys: string[]) => {
       const pending = new Set(storageKeys.filter(Boolean))
+
       if (pending.size === 0) return
 
       const deadline = Date.now() + pollTimeoutMs
@@ -138,8 +133,7 @@ export function usePhotoUploadQueue({
             }
           }
         } catch {
-          // Gangguan jaringan sesaat bukan alasan menggagalkan upload; coba
-          // lagi pada putaran berikutnya sampai batas waktu.
+          // Gangguan polling tidak membatalkan upload yang sudah tersimpan.
         }
 
         if (pending.size === 0 || Date.now() >= deadline) break
@@ -157,15 +151,17 @@ export function usePhotoUploadQueue({
   )
 
   const runBatchConfirm = useCallback(async () => {
-    if (confirmInFlightRef.current) return
+    if (confirmInFlightRef.current || !activeRef.current) return
 
     const current = itemsRef.current
+
     const stillWorking = current.some(
       (item) =>
         item.status === 'pending' ||
         item.status === 'requesting_url' ||
         (item.status === 'uploading' && item.progress < 1),
     )
+
     if (stillWorking) return
 
     const ready = current.filter(
@@ -175,6 +171,7 @@ export function usePhotoUploadQueue({
         item.storageKey &&
         !confirmedKeysRef.current.has(item.storageKey),
     )
+
     if (ready.length === 0) return
 
     confirmInFlightRef.current = true
@@ -193,13 +190,24 @@ export function usePhotoUploadQueue({
         })),
       })
 
+      if (!activeRef.current) return
+
       for (const failure of result.failed) {
         confirmedKeysRef.current.delete(failure.storage_key)
+
         const target = itemsRef.current.find(
           (item) => item.storageKey === failure.storage_key,
         )
+
         if (target) {
-          patchItem(target.id, { status: 'error', error: failure.message })
+          patchItem(target.id, {
+            status: 'error',
+            error: failure.message,
+          })
+
+          toast.error(`Gagal menyimpan ${target.file.name}`, {
+            description: failure.message,
+          })
         }
       }
 
@@ -221,10 +229,22 @@ export function usePhotoUploadQueue({
         onCompletedRef.current?.()
       }
     } catch (error) {
+      if (!activeRef.current) return
+
+      const message = getErrorMessage(error)
+
       for (const item of ready) {
         confirmedKeysRef.current.delete(item.storageKey as string)
-        patchItem(item.id, { status: 'error', error: errorMessage(error) })
+
+        patchItem(item.id, {
+          status: 'error',
+          error: message,
+        })
       }
+
+      toast.error('Gagal menyimpan foto ke server', {
+        description: message,
+      })
     } finally {
       confirmInFlightRef.current = false
     }
@@ -233,6 +253,7 @@ export function usePhotoUploadQueue({
   const processItem = useCallback(
     async (id: string) => {
       const item = itemsRef.current.find((candidate) => candidate.id === id)
+
       if (!item) return
 
       try {
@@ -244,6 +265,7 @@ export function usePhotoUploadQueue({
         })
 
         const presign = await requestPresignedUpload(item.file)
+
         if (!activeRef.current) return
 
         patchItem(id, {
@@ -257,41 +279,75 @@ export function usePhotoUploadQueue({
         })
 
         if (!activeRef.current) return
+
         patchItem(id, { progress: 1 })
       } catch (error) {
         if (!activeRef.current) return
-        patchItem(id, { status: 'error', error: errorMessage(error) })
+
+        const message = getErrorMessage(error)
+
+        patchItem(id, {
+          status: 'error',
+          error: message,
+        })
+
+        toast.error(`Gagal mengunggah ${item.file.name}`, {
+          description: message,
+        })
       }
     },
     [patchItem],
   )
 
-  const pump = useCallback(function pumpQueue() {
-    while (runningRef.current < concurrency && queueRef.current.length > 0) {
-      const id = queueRef.current.shift()
-      if (!id) return
+  const pump = useCallback(
+    function pumpQueue() {
+      while (
+        runningRef.current < concurrency &&
+        queueRef.current.length > 0
+      ) {
+        const id = queueRef.current.shift()
 
-      runningRef.current += 1
+        if (!id) return
 
-      void processItem(id).finally(() => {
-        runningRef.current -= 1
-        pumpQueue()
-        void runBatchConfirm()
-      })
-    }
-  }, [concurrency, processItem, runBatchConfirm])
+        runningRef.current += 1
+
+        void processItem(id).finally(() => {
+          runningRef.current -= 1
+          pumpQueue()
+          void runBatchConfirm()
+        })
+      }
+    },
+    [concurrency, processItem, runBatchConfirm],
+  )
 
   const addFiles = useCallback(
     (files: File[]) => {
       if (files.length === 0) return
 
-      const created = files.map((file) => {
+      const validFiles: File[] = []
+
+      for (const file of files) {
+        try {
+          validateUploadFile(file)
+          validFiles.push(file)
+        } catch (error) {
+          toast.error('File tidak dapat ditambahkan', {
+            description: getErrorMessage(error),
+          })
+        }
+      }
+
+      if (validFiles.length === 0) return
+
+      const created: UploadItem[] = validFiles.map((file) => {
         itemCounterRef.current += 1
+
         return {
           id: `upload-${itemCounterRef.current}`,
           file,
           previewUrl: URL.createObjectURL(file),
-          status: 'pending' as const,
+          status: 'pending',
           progress: 0,
         }
       })
@@ -308,9 +364,21 @@ export function usePhotoUploadQueue({
   const retry = useCallback(
     (id: string) => {
       const item = itemsRef.current.find((candidate) => candidate.id === id)
+
       if (!item || item.status !== 'error') return
 
-      if (item.storageKey) confirmedKeysRef.current.delete(item.storageKey)
+      try {
+        validateUploadFile(item.file)
+      } catch (error) {
+        toast.error('File tidak dapat diunggah', {
+          description: getErrorMessage(error),
+        })
+        return
+      }
+
+      if (item.storageKey) {
+        confirmedKeysRef.current.delete(item.storageKey)
+      }
 
       patchItem(id, {
         status: 'pending',
@@ -331,11 +399,16 @@ export function usePhotoUploadQueue({
 
     return () => {
       activeRef.current = false
+
       for (const item of itemsRef.current) {
         URL.revokeObjectURL(item.previewUrl)
       }
     }
   }, [])
 
-  return { items, addFiles, retry }
+  return {
+    items,
+    addFiles,
+    retry,
+  }
 }

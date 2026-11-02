@@ -1,11 +1,23 @@
+
 import axios from 'axios'
 
-import { api } from './api'
-import type {
-  BatchConfirmResult,
-  BatchPhotoInput,
-  Photo,
-} from '@/types/photo'
+import { api } from '@/services/api'
+
+export const MAX_FILE_SIZE = 20 * 1024 * 1024
+
+const ALLOWED_TYPES: Record<string, string> = {
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png': 'image/png',
+  '.webp': 'image/webp',
+}
+
+export class UploadError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'UploadError'
+  }
+}
 
 export interface PresignedUpload {
   upload_url: string
@@ -16,214 +28,257 @@ export interface PresignedUpload {
   expires_at: string
 }
 
-interface APIEnvelope<T> {
+export interface BatchPhotoInput {
+  storage_key: string
+}
+
+export interface ConfirmedPhoto {
+  storage_key: string
+  thumbnail_url?: string | null
+}
+
+export interface BatchConfirmResult {
+  items: ConfirmedPhoto[]
+  failed: {
+    storage_key: string
+    message: string
+  }[]
+}
+
+interface ApiResponse<T> {
   success: boolean
-  data: T | null
-  error: { message?: string } | null
+  data: T
+  error: {
+    message: string
+  } | null
 }
 
-// Harus sama dengan allowedContentTypes di livesync-api/internal/handlers/storage.go.
-const ALLOWED_CONTENT_TYPES = [
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-  'image/gif',
-  'image/heic',
-  'image/heif',
-] as const
-
-// Sebagian browser tidak mengisi File.type untuk HEIC/HEIF, jadi ekstensi dipakai
-// sebagai cadangan.
-const EXTENSION_CONTENT_TYPES: Record<string, string> = {
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  png: 'image/png',
-  webp: 'image/webp',
-  gif: 'image/gif',
-  heic: 'image/heic',
-  heif: 'image/heif',
+function getExtension(filename: string): string {
+  const dotIndex = filename.lastIndexOf('.')
+  return dotIndex >= 0 ? filename.slice(dotIndex).toLowerCase() : ''
 }
 
-export class UploadError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = 'UploadError'
-  }
-}
+export function validateUploadFile(file: File): void {
+  const extension = getExtension(file.name)
+  const expectedType = ALLOWED_TYPES[extension]
 
-/** Menentukan content type yang akan ditandatangani, atau null jika tidak didukung. */
-export function detectContentType(file: File): string | null {
-  const declared = file.type.trim().toLowerCase()
-  if ((ALLOWED_CONTENT_TYPES as readonly string[]).includes(declared)) {
-    return declared
-  }
-
-  const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
-  return EXTENSION_CONTENT_TYPES[extension] ?? null
-}
-
-/** Meminta URL PUT sementara ke backend Golang. */
-export async function requestPresignedUpload(file: File): Promise<PresignedUpload> {
-  const contentType = detectContentType(file)
-
-  if (!contentType) {
+  if (!expectedType) {
     throw new UploadError(
-      'Format file tidak didukung. Gunakan JPG, PNG, WEBP, GIF, HEIC, atau HEIF.',
+      `Format file "${file.name}" tidak didukung. Gunakan JPG, PNG, atau WEBP.`,
     )
   }
 
-  const response = await api.post<APIEnvelope<PresignedUpload>>(
-    '/api/media/presign-upload',
-    { filename: file.name, content_type: contentType },
-  )
-
-  const body = response.data
-
-  if (!body.success || !body.data) {
-    throw new UploadError(body.error?.message ?? 'Gagal membuat URL upload.')
+  if (file.size === 0) {
+    throw new UploadError(`File "${file.name}" kosong dan tidak dapat diunggah.`)
   }
 
-  return body.data
+  if (file.size > MAX_FILE_SIZE) {
+    throw new UploadError(
+      `File "${file.name}" melebihi batas maksimal 20 MB.`,
+    )
+  }
+
+  if (file.type && file.type !== expectedType) {
+    throw new UploadError(
+      `Tipe file "${file.name}" tidak sesuai dengan ekstensinya.`,
+    )
+  }
 }
 
-/**
- * Upload langsung ke R2 memakai URL hasil presign.
- *
- * Header Content-Type wajib persis sama dengan yang ditandatangani backend;
- * menambah header lain atau mengubah nilainya membuat signature tidak valid.
- */
+function detectContentType(file: File): string {
+  validateUploadFile(file)
+
+  const extension = getExtension(file.name)
+  return ALLOWED_TYPES[extension]
+}
+
+function getApiErrorMessage(error: unknown): string | undefined {
+  if (!axios.isAxiosError(error)) return undefined
+
+  const responseData = error.response?.data as
+    | ApiResponse<unknown>
+    | { message?: string; error?: { message?: string } }
+    | undefined
+
+  if (!responseData) return undefined
+
+  if ('error' in responseData && responseData.error?.message) {
+    return responseData.error.message
+  }
+
+  if ('message' in responseData && responseData.message) {
+    return responseData.message
+  }
+
+  return undefined
+}
+
+export function normalizeUploadError(error: unknown): UploadError {
+  if (error instanceof UploadError) return error
+
+  const serverMessage = getApiErrorMessage(error)
+
+  if (serverMessage) {
+    return new UploadError(serverMessage)
+  }
+
+  if (axios.isAxiosError(error)) {
+    if (!error.response) {
+      return new UploadError(
+        'Tidak dapat terhubung ke server. Periksa koneksi internet Anda.',
+      )
+    }
+
+    switch (error.response.status) {
+      case 400:
+        return new UploadError('Data upload tidak valid.')
+      case 401:
+        return new UploadError('Sesi Anda telah berakhir. Silakan login kembali.')
+      case 403:
+        return new UploadError('Anda tidak memiliki izin untuk mengunggah foto.')
+      case 413:
+        return new UploadError('Ukuran file melebihi batas maksimal 20 MB.')
+      case 415:
+        return new UploadError('Format file tidak didukung oleh server.')
+      default:
+        return new UploadError('Terjadi kesalahan pada server saat mengunggah foto.')
+    }
+  }
+
+  if (error instanceof Error && error.message) {
+    return new UploadError(error.message)
+  }
+
+  return new UploadError('Upload gagal. Silakan coba lagi.')
+}
+
+function unwrapResponse<T>(response: { data: ApiResponse<T> | T }): T {
+  const body = response.data
+
+  if (
+    body &&
+    typeof body === 'object' &&
+    'success' in body &&
+    'data' in body
+  ) {
+    const envelope = body as ApiResponse<T>
+
+    if (!envelope.success) {
+      throw new UploadError(
+        envelope.error?.message ?? 'Permintaan upload gagal.',
+      )
+    }
+
+    return envelope.data
+  }
+
+  return body as T
+}
+
+export async function requestPresignedUpload(
+  file: File,
+): Promise<PresignedUpload> {
+  try {
+    validateUploadFile(file)
+
+    const contentType = detectContentType(file)
+
+    const response = await api.post<ApiResponse<PresignedUpload>>(
+      '/api/media/presign-upload',
+      {
+        filename: file.name,
+        content_type: contentType,
+      },
+    )
+
+    return unwrapResponse(response)
+  } catch (error) {
+    throw normalizeUploadError(error)
+  }
+}
+
 export async function uploadToR2(
   file: File,
   presign: PresignedUpload,
   onProgress?: (fraction: number) => void,
 ): Promise<void> {
   try {
+    validateUploadFile(file)
+
     await axios.put(presign.upload_url, file, {
-      headers: { 'Content-Type': presign.content_type },
+      headers: {
+        'Content-Type': presign.content_type,
+      },
       onUploadProgress: (event) => {
-        const total = event.total ?? file.size
-        if (!total) return
-        onProgress?.(Math.min(1, Math.max(0, event.loaded / total)))
+        if (!event.total) return
+
+        const fraction = Math.min(event.loaded / event.total, 1)
+        onProgress?.(fraction)
       },
     })
+
+    onProgress?.(1)
   } catch (error) {
-    if (axios.isAxiosError(error)) {
-      if (error.response?.status === 403) {
-        throw new UploadError(
-          'R2 menolak upload (403). Content-Type harus sama persis dengan yang di-presign.',
-        )
-      }
-      if (!error.response) {
-        throw new UploadError(
-          'Tidak bisa menghubungi R2. Periksa koneksi internet dan aturan CORS bucket.',
-        )
-      }
-      throw new UploadError(`Upload ke R2 gagal (${error.response.status}).`)
-    }
-    throw new UploadError('Upload ke R2 gagal.')
+    throw normalizeUploadError(error)
   }
 }
 
-export interface ConfirmPhotoInput {
+export async function confirmPhotosBatch(input: {
+  eventId: string
+  uploader?: string
+  photos: BatchPhotoInput[]
+}): Promise<BatchConfirmResult> {
+  try {
+    const response = await api.post<ApiResponse<BatchConfirmResult>>(
+      '/api/media/confirm-batch',
+      {
+        event_id: input.eventId,
+        ...(input.uploader ? { uploader: input.uploader } : {}),
+        photos: input.photos,
+      },
+    )
+
+    return unwrapResponse(response)
+  } catch (error) {
+    throw normalizeUploadError(error)
+  }
+}
+
+export async function confirmPhotoUpload(input: {
   eventId: string
   storageKey: string
   uploader?: string
   blurHash?: string
-}
-
-/**
- * Memanggil endpoint konfirmasi dan menerjemahkan error jaringan/backend
- * menjadi UploadError dengan pesan yang bisa ditampilkan ke pengguna.
- */
-async function postConfirmation<T>(
-  path: string,
-  payload: unknown,
-): Promise<T> {
+}): Promise<unknown> {
   try {
-    const response = await api.post<APIEnvelope<T>>(path, payload)
+    const response = await api.post('/api/media/confirm', {
+      event_id: input.eventId,
+      storage_key: input.storageKey,
+      ...(input.uploader ? { uploader: input.uploader } : {}),
+      ...(input.blurHash ? { blur_hash: input.blurHash } : {}),
+    })
 
-    const body = response.data
-
-    if (!body.success || !body.data) {
-      throw new UploadError(
-        body.error?.message ?? 'Gagal menyimpan foto ke event.',
-      )
-    }
-
-    return body.data
+    return unwrapResponse(response)
   } catch (error) {
-    if (error instanceof UploadError) throw error
-
-    if (axios.isAxiosError(error)) {
-      const message = (
-        error.response?.data as APIEnvelope<never> | undefined
-      )?.error?.message
-
-      throw new UploadError(message ?? 'Gagal menyimpan foto ke event.')
-    }
-
-    throw new UploadError('Gagal menyimpan foto ke event.')
+    throw normalizeUploadError(error)
   }
 }
 
-/**
- * Menyimpan metadata foto ke MongoDB lewat API setelah object berhasil
- * di-upload ke R2. Server yang membangun URL publik dari storage_key.
- */
-export async function confirmPhotoUpload({
-  eventId,
-  storageKey,
-  uploader,
-  blurHash,
-}: ConfirmPhotoInput): Promise<Photo> {
-  return postConfirmation<Photo>('/api/media/confirm', {
-    event_id: eventId,
-    storage_key: storageKey,
-    ...(uploader ? { uploader } : {}),
-    ...(blurHash ? { blur_hash: blurHash } : {}),
-  })
-}
-
-export interface ConfirmPhotosBatchInput {
-  eventId: string
-  uploader?: string
-  photos: BatchPhotoInput[]
-}
-
-/**
- * Mengirim konfirmasi banyak foto sekaligus setelah semua PUT ke R2 selesai.
- * Server mengembalikan item yang tersimpan dan item yang gagal secara terpisah.
- */
-export async function confirmPhotosBatch({
-  eventId,
-  uploader,
-  photos,
-}: ConfirmPhotosBatchInput): Promise<BatchConfirmResult> {
-  return postConfirmation<BatchConfirmResult>('/api/media/confirm-batch', {
-    event_id: eventId,
-    ...(uploader ? { uploader } : {}),
-    photos,
-  })
-}
-
-export interface UploadPhotoOptions {
-  eventId: string
-  uploader?: string
-  onProgress?: (fraction: number) => void
-}
-
-/** Alur lengkap satu foto: presign → PUT langsung ke R2 → simpan ke Mongo. */
 export async function uploadPhoto(
   file: File,
-  { eventId, uploader, onProgress }: UploadPhotoOptions,
-): Promise<Photo> {
-  const presign = await requestPresignedUpload(file)
+  input: {
+    eventId: string
+    uploader?: string
+  },
+): Promise<unknown> {
+  validateUploadFile(file)
 
-  await uploadToR2(file, presign, onProgress)
+  const presign = await requestPresignedUpload(file)
+  await uploadToR2(file, presign)
 
   return confirmPhotoUpload({
-    eventId,
+    eventId: input.eventId,
     storageKey: presign.key,
-    uploader,
+    uploader: input.uploader,
   })
 }
