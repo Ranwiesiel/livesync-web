@@ -171,6 +171,7 @@ export function useEventWebSocket(
         }
 
         setLastMessage(message);
+        console.log("[WebSocket] Pesan diterima:", message);
 
         // NEW_PHOTO: sisipkan ke cache galeri dan tandai untuk highlight.
         const newPhoto = extractNewPhoto(message);
@@ -302,13 +303,23 @@ export function useEventWebSocket(
       const socket = socketRef.current;
 
       if (!socket || socket.readyState !== WebSocket.OPEN) {
+        console.warn("[WebSocket] Pesan gagal dikirim.", {
+          status: socket?.readyState ?? "NO_SOCKET",
+          message,
+        });
+
         return false;
       }
 
       try {
         socket.send(JSON.stringify(message));
+
+        console.log("[WebSocket] Pesan berhasil dikirim:", message);
+
         return true;
-      } catch {
+      } catch (error) {
+        console.error("[WebSocket] Gagal mengirim pesan:", error);
+
         return false;
       }
     },

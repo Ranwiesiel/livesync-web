@@ -14,6 +14,7 @@ import EventResultCard from "@/components/event/EventResultCard";
 import RoomQRCode from "@/components/event/RoomQRCode";
 import DropzoneModal from "@/components/photos/DropzoneModal";
 import PhotoGallery from "@/components/photos/PhotoGallery";
+import ReactionFloatingBar from "@/components/event/ReactionFloatingBar";
 
 import {
   EventWebSocketProvider,
@@ -207,6 +208,9 @@ function EventDetailContent({ code }: EventDetailContentProps) {
         emptyMessage="Belum ada foto yang diunggah ke event ini."
         highlightedPhotoIds={recentPhotoIds}
       />
+
+      {/* Floating Reaction Bar */}
+      {event.is_active && <ReactionFloatingBar />}
     </main>
   );
 }

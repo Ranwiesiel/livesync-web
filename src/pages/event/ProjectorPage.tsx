@@ -13,6 +13,7 @@ import type { Photo } from "@/types/photo";
 
 import { EventWebSocketProvider, useEventWebSocketContext } from "@/contexts/EventWebsocketContext";
 import RoomQRCode from "@/components/event/RoomQRCode";
+import FloatingReactions from "@/components/projector/FloatingReactions";
 
 function FullscreenButton() {
   const [isFullscreen, setIsFullscreen] = useState(
@@ -216,6 +217,8 @@ function ProjectorContent({ code }: { code: string }) {
           />
         </div>
       </div>
+      {/* Floating emoji dan confetti dari WebSocket */}
+      <FloatingReactions eventId={event.id} />
     </main>
   );
 }
