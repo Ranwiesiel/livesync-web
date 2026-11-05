@@ -6,7 +6,7 @@ import axios from "axios";
 
 import { api } from "@/services/api";
 import { buildJoinUrl } from "@/lib/join-url";
-import { releaseImage } from "@/lib/image-memory";
+import { releaseImage, TRANSPARENT_PIXEL } from "@/lib/image-memory";
 import { cn } from "@/lib/utils";
 import { useEventPhotos } from "@/hooks/use-event-photos";
 import { usePresentationQueue } from "@/hooks/use-presentation-queue";
@@ -127,6 +127,13 @@ function CrossfadePhoto({ photo }: { photo: Photo }) {
   // hasil decode tidak menggantung di memori selama sesi panjang.
   const attachCurrentImage = useCallback((node: HTMLImageElement | null) => {
     if (node) {
+      // StrictMode (dev) melepas lalu memasang kembali ref pada node yang
+      // sama. releaseImage sudah mengganti src ke piksel transparan, jadi
+      // kembalikan URL foto saat node dipasang lagi.
+      if (node.getAttribute("src") === TRANSPARENT_PIXEL) {
+        node.src = currentSrcRef.current;
+      }
+
       currentImageRef.current = node;
       return;
     }
