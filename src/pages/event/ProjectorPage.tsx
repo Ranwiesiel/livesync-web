@@ -116,89 +116,218 @@ export function ProjectorConnectionStatus({
   );
 }
 
+interface CrossfadeState {
+  sources: [string, string];
+  active: 0 | 1;
+  pending: { index: 0 | 1; src: string } | null;
+}
+
+function beginTransition(state: CrossfadeState, src: string): CrossfadeState {
+  if (state.sources[state.active] === src) {
+    return state.pending ? { ...state, pending: null } : state;
+  }
+
+  const index = state.active === 0 ? 1 : 0;
+  const sources: [string, string] = [...state.sources];
+  sources[index] = src;
+
+  return { sources, active: state.active, pending: { index, src } };
+}
+
 function CrossfadePhoto({ photo }: { photo: Photo }) {
-  const [previousSrc, setPreviousSrc] = useState<string | null>(null);
-  const currentSrcRef = useRef(photo.url);
+  // Thumbnail tampil lebih dulu supaya layar tidak kosong; foto asli
+  // di-upgrade setelah selesai di-decode.
+  const initialSrc = photo.thumbnail_url || photo.url;
+  const [state, setState] = useState<CrossfadeState>({
+    sources: [initialSrc, initialSrc],
+    active: 0,
+    pending: null,
+  });
+  const [renderedPhotoId, setRenderedPhotoId] = useState(photo.id);
+  const layerRefs = useRef<[HTMLImageElement | null, HTMLImageElement | null]>([
+    null,
+    null,
+  ]);
 
-  const currentImageRef = useRef<HTMLImageElement | null>(null);
-  const previousImageRef = useRef<HTMLImageElement | null>(null);
+  if (renderedPhotoId !== photo.id) {
+    setRenderedPhotoId(photo.id);
+    setState((current) => beginTransition(current, initialSrc));
+  }
 
-  // Saat elemen <img> lama dilepas, ganti resource-nya agar bitmap besar
-  // hasil decode tidak menggantung di memori selama sesi panjang.
-  const attachCurrentImage = useCallback((node: HTMLImageElement | null) => {
-    if (node) {
-      // StrictMode (dev) melepas lalu memasang kembali ref pada node yang
-      // sama. releaseImage sudah mengganti src ke piksel transparan, jadi
-      // kembalikan URL foto saat node dipasang lagi.
-      if (node.getAttribute("src") === TRANSPARENT_PIXEL) {
-        node.src = currentSrcRef.current;
+  const attachLayer = useCallback(
+    (index: 0 | 1) => (node: HTMLImageElement | null) => {
+      if (node) {
+        if (node.getAttribute("src") === TRANSPARENT_PIXEL) {
+          node.src = node.dataset.src ?? "";
+        }
+        layerRefs.current[index] = node;
+        return;
       }
 
-      currentImageRef.current = node;
-      return;
-    }
-
-    releaseImage(currentImageRef.current);
-    currentImageRef.current = null;
-  }, []);
-
-  const attachPreviousImage = useCallback((node: HTMLImageElement | null) => {
-    if (node) {
-      previousImageRef.current = node;
-      return;
-    }
-
-    releaseImage(previousImageRef.current);
-    previousImageRef.current = null;
-  }, []);
-
-  useEffect(() => {
-    if (photo.url === currentSrcRef.current) return;
-
-    const previous = currentSrcRef.current;
-
-    currentSrcRef.current = photo.url;
-    setPreviousSrc(previous);
-
-    // Lepas lapisan lama setelah animasi crossfade selesai.
-    const timer = setTimeout(() => setPreviousSrc(null), 800);
-
-    return () => clearTimeout(timer);
-  }, [photo.url]);
-
-  // Bersihkan juga saat operator menutup halaman proyektor.
-  useEffect(
-    () => () => {
-      releaseImage(currentImageRef.current);
-      releaseImage(previousImageRef.current);
-      currentImageRef.current = null;
-      previousImageRef.current = null;
+      releaseImage(layerRefs.current[index]);
+      layerRefs.current[index] = null;
     },
     [],
   );
 
-  return (
-    <div className="absolute inset-0">
-      {previousSrc && (
-        <img
-          ref={attachPreviousImage}
-          src={previousSrc}
-          alt=""
-          aria-hidden="true"
-          decoding="async"
-          className="absolute inset-0 h-full w-full object-contain"
-        />
-      )}
+  const attachLayer0 = useMemo(() => attachLayer(0), [attachLayer]);
+  const attachLayer1 = useMemo(() => attachLayer(1), [attachLayer]);
 
-      <img
-        ref={attachCurrentImage}
-        key={photo.url}
-        src={photo.url}
-        alt={`Foto oleh ${photo.uploader || "Peserta"}`}
-        decoding="async"
-        className="absolute inset-0 h-full w-full object-contain animate-[projector-fade_800ms_ease-out]"
-      />
+  const activate = useCallback((index: 0 | 1, src: string) => {
+    const image = layerRefs.current[index];
+
+    if (!image || image.getAttribute("src") !== src) return;
+    if (!image.complete || image.naturalWidth === 0) return;
+
+    const decoded =
+      typeof image.decode === "function" ? image.decode() : Promise.resolve();
+
+    void decoded
+      .catch(() => {})
+      .then(() => {
+        setState((current) =>
+          current.pending?.index === index && current.pending.src === src
+            ? { ...current, active: index, pending: null }
+            : current,
+        );
+      });
+  }, []);
+
+  const handleLayerLoad = useCallback(
+    (index: 0 | 1) => (event: React.SyntheticEvent<HTMLImageElement>) => {
+      const src = event.currentTarget.getAttribute("src");
+      if (src) activate(index, src);
+    },
+    [activate],
+  );
+
+  const handleLayerError = useCallback(
+    (index: 0 | 1) => () => {
+      setState((current) =>
+        current.pending?.index === index
+          ? { ...current, pending: null }
+          : current,
+      );
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const thumbnail = photo.thumbnail_url || photo.url;
+
+    if (!photo.thumbnail_url || photo.url === thumbnail) return;
+
+    const startedAt = performance.now();
+    let cancelled = false;
+    let upgradeTimer: number | undefined;
+
+    const preload = new Image();
+    preload.decoding = "async";
+    preload.onload = () => {
+      if (cancelled) return;
+
+      // Tunggu crossfade thumbnail selesai dulu, supaya foto asli tidak
+      // memotong animasi di tengah jalan (terlihat seperti kedipan).
+      const delay = Math.max(0, 800 - (performance.now() - startedAt));
+
+      upgradeTimer = window.setTimeout(() => {
+        if (cancelled) return;
+
+        setState((current) => beginTransition(current, photo.url));
+      }, delay);
+    };
+    preload.src = photo.url;
+
+    return () => {
+      cancelled = true;
+      preload.onload = null;
+      if (upgradeTimer !== undefined) window.clearTimeout(upgradeTimer);
+    };
+  }, [photo.id, photo.url, photo.thumbnail_url]);
+
+  // Target yang sudah ter-cache saat src dipasang bisa tidak memicu onLoad.
+  useEffect(() => {
+    if (!state.pending) return;
+    activate(state.pending.index, state.pending.src);
+  }, [state.pending, state.sources, activate]);
+
+  return (
+    <div className="absolute inset-0 bg-black">
+      {state.sources.map((src, index) => {
+        const layer = index as 0 | 1;
+        const isActive = state.active === layer;
+
+        return (
+          <img
+            key={layer}
+            ref={layer === 0 ? attachLayer0 : attachLayer1}
+            data-src={src}
+            data-layer={layer}
+            src={src}
+            alt={isActive ? `Foto oleh ${photo.uploader || "Peserta"}` : ""}
+            aria-hidden={!isActive}
+            decoding="async"
+            onLoad={layer === 0 ? handleLayerLoad(0) : handleLayerLoad(1)}
+            onError={layer === 0 ? handleLayerError(0) : handleLayerError(1)}
+            style={{
+              opacity: isActive ? 1 : 0,
+              transition: "opacity 800ms ease-out",
+            }}
+            className="absolute inset-0 h-full w-full object-contain"
+          />
+        );
+      })}
     </div>
+  );
+}
+
+/**
+ * Mulai mengunduh foto asli berikutnya satu slide lebih awal. Foto proyektor
+ * bisa berukuran beberapa megabyte; tanpa head start, slide sering berganti
+ * sebelum foto asli selesai diunduh sehingga yang tampil hanya thumbnail.
+ */
+function usePrefetchNextPhoto(photos: Photo[], currentPhoto: Photo | null) {
+  const prefetchedRef = useRef(new Map<string, HTMLImageElement>());
+  const failedRef = useRef(new Set<string>());
+
+  useEffect(() => {
+    if (!currentPhoto) return;
+
+    const index = photos.findIndex((photo) => photo.id === currentPhoto.id);
+
+    if (index === -1) return;
+
+    const nextPhoto = photos[(index + 1) % photos.length];
+
+    if (!nextPhoto || nextPhoto.id === currentPhoto.id) return;
+    if (!nextPhoto.thumbnail_url || nextPhoto.url === nextPhoto.thumbnail_url) {
+      return;
+    }
+    if (
+      prefetchedRef.current.has(nextPhoto.url) ||
+      failedRef.current.has(nextPhoto.url)
+    ) {
+      return;
+    }
+
+    const preload = new Image();
+    preload.decoding = "async";
+    preload.onload = () => prefetchedRef.current.delete(nextPhoto.url);
+    preload.onerror = () => {
+      failedRef.current.add(nextPhoto.url);
+      prefetchedRef.current.delete(nextPhoto.url);
+    };
+    preload.src = nextPhoto.url;
+
+    // Simpan referensi sampai selesai supaya unduhan tidak dibatalkan GC.
+    prefetchedRef.current.set(nextPhoto.url, preload);
+  }, [currentPhoto, photos]);
+
+  useEffect(
+    () => () => {
+      prefetchedRef.current.clear();
+    },
+    [],
   );
 }
 
@@ -236,6 +365,8 @@ function ProjectorContent({ code }: { code: string }) {
   );
 
   const currentPhoto = usePresentationQueue(photos, recentPhotoIds);
+
+  usePrefetchNextPhoto(photos, currentPhoto);
 
   if (eventQuery.isPending) {
     return (
