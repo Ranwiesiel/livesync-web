@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { Maximize, Minimize } from "lucide-react";
@@ -6,8 +6,11 @@ import axios from "axios";
 
 import { api } from "@/services/api";
 import { buildJoinUrl } from "@/lib/join-url";
+import { releaseImage } from "@/lib/image-memory";
+import { cn } from "@/lib/utils";
 import { useEventPhotos } from "@/hooks/use-event-photos";
 import { usePresentationQueue } from "@/hooks/use-presentation-queue";
+import type { WebSocketStatus } from "@/hooks/useEventWebsocket";
 import type { ApiResponse, Event } from "@/types/event";
 import type { Photo } from "@/types/photo";
 
@@ -57,9 +60,90 @@ function FullscreenButton() {
   );
 }
 
+const CONNECTION_INDICATOR: Record<
+  WebSocketStatus,
+  { label: string; dotClassName: string; textClassName: string }
+> = {
+  connected: {
+    label: "Connected",
+    dotClassName: "bg-emerald-400",
+    textClassName: "text-emerald-200",
+  },
+  connecting: {
+    label: "Menghubungkan…",
+    dotClassName: "bg-amber-400 animate-pulse",
+    textClassName: "text-amber-200",
+  },
+  reconnecting: {
+    label: "Reconnecting…",
+    dotClassName: "bg-red-500 animate-pulse",
+    textClassName: "text-red-200",
+  },
+  disconnected: {
+    label: "Terputus",
+    dotClassName: "bg-red-500",
+    textClassName: "text-red-200",
+  },
+};
+
+/** Indikator kecil agar operator tahu koneksi realtime masih hidup. */
+export function ProjectorConnectionStatus({
+  status,
+  detail,
+}: {
+  status: WebSocketStatus;
+  detail?: string | null;
+}) {
+  const indicator =
+    CONNECTION_INDICATOR[status] ?? CONNECTION_INDICATOR.disconnected;
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-label={`Status koneksi: ${indicator.label}`}
+      title={detail ?? undefined}
+      className="flex items-center gap-2 rounded-full border border-white/10 bg-black/40 px-3 py-1 text-[11px]"
+    >
+      <span
+        aria-hidden="true"
+        className={cn("size-2 rounded-full", indicator.dotClassName)}
+      />
+      <span className={cn("font-medium", indicator.textClassName)}>
+        {indicator.label}
+      </span>
+    </div>
+  );
+}
+
 function CrossfadePhoto({ photo }: { photo: Photo }) {
   const [previousSrc, setPreviousSrc] = useState<string | null>(null);
   const currentSrcRef = useRef(photo.url);
+
+  const currentImageRef = useRef<HTMLImageElement | null>(null);
+  const previousImageRef = useRef<HTMLImageElement | null>(null);
+
+  // Saat elemen <img> lama dilepas, ganti resource-nya agar bitmap besar
+  // hasil decode tidak menggantung di memori selama sesi panjang.
+  const attachCurrentImage = useCallback((node: HTMLImageElement | null) => {
+    if (node) {
+      currentImageRef.current = node;
+      return;
+    }
+
+    releaseImage(currentImageRef.current);
+    currentImageRef.current = null;
+  }, []);
+
+  const attachPreviousImage = useCallback((node: HTMLImageElement | null) => {
+    if (node) {
+      previousImageRef.current = node;
+      return;
+    }
+
+    releaseImage(previousImageRef.current);
+    previousImageRef.current = null;
+  }, []);
 
   useEffect(() => {
     if (photo.url === currentSrcRef.current) return;
@@ -75,21 +159,36 @@ function CrossfadePhoto({ photo }: { photo: Photo }) {
     return () => clearTimeout(timer);
   }, [photo.url]);
 
+  // Bersihkan juga saat operator menutup halaman proyektor.
+  useEffect(
+    () => () => {
+      releaseImage(currentImageRef.current);
+      releaseImage(previousImageRef.current);
+      currentImageRef.current = null;
+      previousImageRef.current = null;
+    },
+    [],
+  );
+
   return (
     <div className="absolute inset-0">
       {previousSrc && (
         <img
+          ref={attachPreviousImage}
           src={previousSrc}
           alt=""
           aria-hidden="true"
+          decoding="async"
           className="absolute inset-0 h-full w-full object-contain"
         />
       )}
 
       <img
+        ref={attachCurrentImage}
         key={photo.url}
         src={photo.url}
         alt={`Foto oleh ${photo.uploader || "Peserta"}`}
+        decoding="async"
         className="absolute inset-0 h-full w-full object-contain animate-[projector-fade_800ms_ease-out]"
       />
     </div>
@@ -97,7 +196,7 @@ function CrossfadePhoto({ photo }: { photo: Photo }) {
 }
 
 function ProjectorContent({ code }: { code: string }) {
-  const { recentPhotoIds } = useEventWebSocketContext();
+  const { recentPhotoIds, status, lastError } = useEventWebSocketContext();
 
   const eventQuery = useQuery({
     queryKey: ["event", code],
@@ -173,6 +272,8 @@ function ProjectorContent({ code }: { code: string }) {
         </div>
 
         <div className="flex shrink-0 items-center gap-3">
+          <ProjectorConnectionStatus status={status} detail={lastError} />
+
           <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-white/50">
             {photos.length} foto
           </span>
