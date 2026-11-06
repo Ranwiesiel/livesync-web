@@ -352,15 +352,11 @@ export function useEventWebSocket(
 
     // Jika koneksi internet kembali tersedia,
     // coba hubungkan kembali tanpa menunggu timer.
+    // Saat jaringan kembali, buka koneksi baru. Socket lama bisa masih
+    // berstatus OPEN padahal koneksi TCP-nya sudah mati (half-open), jadi
+    // menunggu onclose bisa memakan waktu sampai timeout pong server.
     const handleOnline = () => {
-      const socket = socketRef.current;
-
-      if (
-        !socket ||
-        socket.readyState === WebSocket.CLOSED
-      ) {
-        reconnect();
-      }
+      reconnect();
     };
 
     window.addEventListener("online", handleOnline);
