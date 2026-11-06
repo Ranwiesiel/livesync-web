@@ -15,6 +15,7 @@ import RoomQRCode from "@/components/event/RoomQRCode";
 import DropzoneModal from "@/components/photos/DropzoneModal";
 import PhotoGallery from "@/components/photos/PhotoGallery";
 import ReactionFloatingBar from "@/components/event/ReactionFloatingBar";
+import FloatingReactions from "@/components/projector/FloatingReactions";
 
 import {
   EventWebSocketProvider,
@@ -208,6 +209,9 @@ function EventDetailContent({ code }: EventDetailContentProps) {
         emptyMessage="Belum ada foto yang diunggah ke event ini."
         highlightedPhotoIds={recentPhotoIds}
       />
+
+      {/* Reaksi hati dari peserta lain */}
+      {event.is_active && <FloatingReactions eventId={event.id} />}
 
       {/* Floating Reaction Bar */}
       {event.is_active && <ReactionFloatingBar />}
